@@ -45,29 +45,37 @@ def run_pipeline(args):
             # prediction file is stored inside eval_dir named <model>_<dataset>.<ext>
             pred_path = get_pred_file_path(str(eval_dir), model_name, dataset_name, use_env_format=True)
             if not Path(pred_path).exists():
-                logger.info(f'No prediction file for {model_name} at {eval_dir} — skipping')
-                
-            # try to locate corresponding eval file
-            try:
-                judge_kwargs = get_judge_kwargs(dataset_name, dataset.TYPE, args)
-            except Exception:
-                judge_kwargs = {}
-            judge_model = judge_kwargs.get('model', '')
-            eval_path = get_intermediate_file_path(pred_path, f"_{judge_model}_result")
-            
-            if not Path(eval_path).exists():
-                logger.info(f'No eval file for {model_name} at {eval_dir} — skipping')
-                eval_path = None
+                logger.info(f'No prediction file for {model_name} at {eval_dir} — continuing to scan for eval/blind files')
 
-            # determine variant (blind vs full) from filename
-            variant = 'blind' if 'blind' in Path(pred_path).name.lower() or 'blind' in eval_dir.name.lower() else 'full'
+            # try to locate corresponding eval file(s)
+            eval_path = None
+            blind_path = None
+            pred_stem = Path(pred_path).stem if pred_path is not None else ''
+            pred_suffix = Path(pred_path).suffix if pred_path is not None else ''
+            for f in eval_dir.iterdir():
+                if not f.is_file():
+                    continue
+                name = f.name
+                # match same stem and suffix
+                if pred_stem and name.startswith(pred_stem) and f.suffix == pred_suffix:
+                    lname = name.lower()
+                    if 'blind' in lname:
+                        blind_path = str(f)
+                    else:
+                        # prefer first non-blind as eval
+                        if eval_path is None:
+                            eval_path = str(f)
+
+            # determine variant (blind vs full) from filename or eval_dir
+            variant = 'blind' if (pred_path and 'blind' in Path(pred_path).name.lower()) or ('blind' in eval_dir.name.lower()) else 'full'
             key = f"{model_name}__{eval_dir.name}"
             result_paths[key] = {
                 'model': model_name,
                 'eval_id': eval_dir.name,
                 'variant': variant,
-                'pred': str(pred_path),
+                'pred': str(pred_path) if pred_path is not None else None,
                 'eval': str(eval_path) if eval_path is not None else None,
+                'blind': str(blind_path) if blind_path is not None else None,
             }
 
     if not result_paths:
@@ -82,6 +90,13 @@ def run_pipeline(args):
                 loaded_results[k] = load(v['eval'])
             else:
                 loaded_results[k] = load(v['pred'])
+            # also preload blind variant if present
+            if v.get('blind'):
+                try:
+                    blind_key = f"{k}__blind"
+                    loaded_results[blind_key] = load(v['blind'])
+                except Exception:
+                    logger.warning(f'Failed to load blind result for {k}')
         except Exception:
             logger.warning(f'Failed to load result for {k}')
             loaded_results[k] = None
@@ -96,7 +111,7 @@ def run_pipeline(args):
             try:
                 det = det_factory()
                 det_res = det.run(context, out_dir=str(Path(args.work_dir)))
-                detector_outputs[det_name] = det_res
+                # detector_outputs[det_name] = det_res
             except Exception as e:
                 logger.exception(f'Detector {det_name} failed: {e}')
                 detector_outputs[det_name] = {'error': str(e)}
@@ -105,7 +120,7 @@ def run_pipeline(args):
     try:
         agg_path = Path(args.work_dir) / 'bench_quality_report.json'
         agg_path.parent.mkdir(parents=True, exist_ok=True)
-        agg = {'date_time': f'{datetime.now()}', 'dataset': dataset_name, 'detectors': detector_outputs, 'result_paths': result_paths}
+        agg = {'date_time': f'{datetime.now()}', 'dataset': dataset_name, 'detector_errors': detector_outputs, 'result_paths': result_paths}
         with open(agg_path, 'w', encoding='utf-8') as f:
             json.dump(agg, f, ensure_ascii=False, indent=2)
         logger.info(f'Wrote aggregated bench quality report: {agg_path}')

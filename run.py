@@ -1179,7 +1179,10 @@ def run_bench_eval_mode(args):
     # Delegate to the centralized bench pipeline
     try:
         from vlmeval.bench_eval import run_pipeline
+        setup_logger(log_file=os.path.join(args.work_dir, 'logs', f'{timestr()}.log'))
         run_pipeline(args)
+    except KeyboardInterrupt:
+        logger.warning("Pipeline interrupted by user.")
     except Exception as e:
         logger.exception(f'Failed to run bench evaluation pipeline: {e}')
 
