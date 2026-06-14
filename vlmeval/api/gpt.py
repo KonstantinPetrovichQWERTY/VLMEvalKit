@@ -269,6 +269,19 @@ class OpenAIWrapper(BaseAPI):
         if hasattr(self, 'baidu_appid'):
             headers['appid'] = self.baidu_appid
 
+        # filtered_msgs = []
+        # for msg in input_msgs:
+        #     if isinstance(msg.get("content"), list):
+        #         filtered_content = [
+        #             item for item in msg["content"] 
+        #             if item.get("type") != "image_url"
+        #         ]
+        #         msg_copy = msg.copy()
+        #         msg_copy["content"] = filtered_content
+        #         filtered_msgs.append(msg_copy)
+        #     else:
+        #         filtered_msgs.append(msg)
+
         payload = dict(
             model=self.model,
             messages=input_msgs,

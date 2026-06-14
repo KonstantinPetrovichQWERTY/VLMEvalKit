@@ -291,7 +291,10 @@ def get_judge_kwargs(dataset_name, dataset_type, args):
             if listinstr(['LLaVABench_KO'], dataset_name):
                 judge_kwargs['model'] = 'gpt-4o-0806'
             else:
-                judge_kwargs['model'] = 'gpt-4-turbo'
+                # judge_kwargs['model'] = 'gpt-4-turbo'
+                # gpt-4-turbo doesn't work :(
+                # and i used the same judge for all experiments
+                judge_kwargs['model'] = 'gpt-4o-mini'
         elif listinstr(['VGRPBench'], dataset_name):
             judge_kwargs['model'] = 'gpt-4o'
         elif listinstr(
@@ -449,7 +452,7 @@ You can launch the evaluation by setting either --data and --model or --config.
 
     # Work Dir & Mode
     parser.add_argument('--work-dir', type=str, default='./outputs', help='select the output directory')
-    parser.add_argument('--mode', type=str, default='all', choices=['all', 'infer', 'eval'])
+    parser.add_argument('--mode', type=str, default='all', choices=['all', 'infer', 'eval', 'bench_eval'])
 
     # API Kwargs, Apply to API VLMs and Judge API LLMs
     parser.add_argument('--api-nproc', type=int, default=32, help='Parallel API calling')
@@ -518,6 +521,10 @@ You can launch the evaluation by setting either --data and --model or --config.
                         help='Status monitoring interval in seconds')
     parser.add_argument('--debug', action='store_true',
                         help='Debug mode: run evaluation in main process')
+
+    # Benchmark evaluation args
+    parser.add_argument('--detectors', type=str, nargs='+', default=['all'],
+                        help='List of benchmark detectors to run (default: all)')
 
     args = parser.parse_args()
     if args.ignore:
@@ -1161,8 +1168,33 @@ def run_api_mode(args):
         log_run_benchmark_report(pred_root)
 
 
+def run_bench_eval_mode(args):
+    """Benchmark quality evaluation pipeline (base implementation).
+
+    This function scans existing prediction outputs produced by local or API
+    pipelines and runs a small set of detectors to produce a benchmark-quality
+    report. It intentionally provides a minimal, extensible core that uses
+    existing dataset loading/evaluation helpers.
+    """
+    # Delegate to the centralized bench pipeline
+    try:
+        from vlmeval.bench_eval import run_pipeline
+        setup_logger(log_file=os.path.join(args.work_dir, 'logs', f'{timestr()}.log'))
+        run_pipeline(args)
+    except KeyboardInterrupt:
+        logger.warning("Pipeline interrupted by user.")
+    except Exception as e:
+        logger.exception(f'Failed to run bench evaluation pipeline: {e}')
+
+
+
 def main():
     args = parse_args()
+    # If the user requested benchmark-quality evaluation only
+    if args.mode == 'bench_eval':
+        run_bench_eval_mode(args)
+        return
+
     if args.api_mode:
         run_api_mode(args)
     else:

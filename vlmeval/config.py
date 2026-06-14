@@ -4,6 +4,7 @@ from functools import partial
 
 import vlmeval.api as api
 import vlmeval.vlm as vlm
+import vlmeval.detector as detector
 
 PandaGPT_ROOT = None
 MiniGPT4_ROOT = None
@@ -47,6 +48,17 @@ video_models = {
     "PLLaVA-34B": partial(
         vlm.PLLaVA, model_path="ermu2001/pllava-34b", dir_root=PLLaVA_ROOT
     ),
+}
+
+# Detector registry for benchmark-quality detectors
+detectors = {
+    'answer_options_distribution': partial(detector.AnswerOptionsDistributionDetector,),
+    'fleiss_kappa_agreement': partial(detector.FleissKappaAgreementDetector,),
+    'consensus_error': partial(detector.ConsensusErrorDetector,),
+    'correctness_agreement': partial(detector.CorrectnessAgreementDetector,),
+    'visual_dependency': partial(detector.VisualDependencyDetector,),
+    'distractor_similarity': partial(detector.DistractorSimilarityDetector,),
+    'question_image_relevance': partial(detector.QuestionImageRelevanceDetector,),
 }
 
 ungrouped = {

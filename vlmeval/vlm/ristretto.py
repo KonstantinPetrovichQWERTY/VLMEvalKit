@@ -338,30 +338,30 @@ class Ristretto(BaseModel):
         if dataset is not None and DATASET_MODALITY(dataset) == 'VIDEO':
             prompt = self.build_video_prompt(prompt, dataset)
 
-        if image_num > 1:
-            image_path = [x['value'] for x in message if x['type'] == 'image']
-            num_patches_list = []
-            pixel_values_list = []
-            for image_idx, file_name in enumerate(image_path):
-                upscale_flag = image_idx == 0 and dataset is not None and listinstr(['MMMU_DEV_VAL'], dataset)
-                curr_pixel_values = load_image(
-                    file_name, input_size=self.image_size, max_num=self.max_num,
-                    upscale=upscale_flag, normalize_type=self.normalize_type
-                ).to(self.device).to(torch.bfloat16)
-                num_patches_list.append(curr_pixel_values.size(0))
-                pixel_values_list.append(curr_pixel_values)
-            pixel_values = torch.cat(pixel_values_list, dim=0)
-        elif image_num == 1:
-            image_path = [x['value'] for x in message if x['type'] == 'image'][0]
-            upscale_flag = dataset is not None and listinstr(['MMMU_DEV_VAL'], dataset)
-            pixel_values = load_image(
-                image_path, input_size=self.image_size, max_num=self.max_num,
-                upscale=upscale_flag, normalize_type=self.normalize_type
-            ).to(self.device).to(torch.bfloat16)
-            num_patches_list = [pixel_values.size(0)]
-        else:
-            pixel_values = None
-            num_patches_list = []
+        # if image_num > 1:
+        #     image_path = [x['value'] for x in message if x['type'] == 'image']
+        #     num_patches_list = []
+        #     pixel_values_list = []
+        #     for image_idx, file_name in enumerate(image_path):
+        #         upscale_flag = image_idx == 0 and dataset is not None and listinstr(['MMMU_DEV_VAL'], dataset)
+        #         curr_pixel_values = load_image(
+        #             file_name, input_size=self.image_size, max_num=self.max_num,
+        #             upscale=upscale_flag, normalize_type=self.normalize_type
+        #         ).to(self.device).to(torch.bfloat16)
+        #         num_patches_list.append(curr_pixel_values.size(0))
+        #         pixel_values_list.append(curr_pixel_values)
+        #     pixel_values = torch.cat(pixel_values_list, dim=0)
+        # elif image_num == 1:
+        #     image_path = [x['value'] for x in message if x['type'] == 'image'][0]
+        #     upscale_flag = dataset is not None and listinstr(['MMMU_DEV_VAL'], dataset)
+        #     pixel_values = load_image(
+        #         image_path, input_size=self.image_size, max_num=self.max_num,
+        #         upscale=upscale_flag, normalize_type=self.normalize_type
+        #     ).to(self.device).to(torch.bfloat16)
+        #     num_patches_list = [pixel_values.size(0)]
+        # else:
+        pixel_values = None
+        num_patches_list = []
 
         num_image_token = 256
         if dataset is not None:
