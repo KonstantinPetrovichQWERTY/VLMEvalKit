@@ -19,6 +19,7 @@ from vlmeval.smp.file import get_intermediate_file_path, get_pred_file_path, get
 from vlmeval.config import detectors as DETECTORS_REGISTRY
 
 from vlmeval.detector.base_detector import AnalysisContext
+from vlmeval.reporting.benchmark_audit import BenchmarkAuditReportGenerator
 logger = get_logger(__name__)
 
 
@@ -148,5 +149,19 @@ def run_pipeline(args):
         logger.info(f'Wrote aggregated bench quality report: {agg_path}')
     except Exception:
         logger.exception('Failed to write aggregated bench quality report')
+
+    # attempt to generate benchmark audit (aggregated detector findings)
+    try:
+        gen = BenchmarkAuditReportGenerator()
+        gen_res = gen.generate(str(Path(args.work_dir)))
+        logger.info(f'Generated benchmark audit reports: {gen_res}')
+        try:
+            agg['audit'] = gen_res
+            with open(Path(args.work_dir) / 'bench_quality_report.json', 'w', encoding='utf-8') as f:
+                json.dump(agg, f, ensure_ascii=False, indent=2)
+        except Exception:
+            logger.exception('Failed to update bench_quality_report.json with audit info')
+    except Exception:
+        logger.exception('Benchmark audit generation failed')
 
     return detector_outputs

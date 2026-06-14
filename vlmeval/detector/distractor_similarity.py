@@ -194,7 +194,30 @@ class DistractorSimilarityDetector(BaseDetector):
         high_sim_rate = 100.0 * (warning_count + critical_count) / total_q if total_q > 0 else 0.0
         critical_rate = 100.0 * critical_count / total_q if total_q > 0 else 0.0
 
-        dataset_report = {'date_time': f"{datetime.now()}", 'detector': self.NAME, 'dataset': getattr(context, 'dataset_name', None), 'num_questions': total_q, 'avg_max_pair_similarity': avg_max, 'duplicate_rate_percent': duplicate_rate, 'high_similarity_rate_percent': high_sim_rate, 'critical_rate_percent': critical_rate, 'thresholds': {'warning': thresh_warn, 'critical': thresh_crit}}
+        dataset_report = {
+            'date_time': f"{datetime.now()}",
+            'detector': self.NAME,
+            'dataset': getattr(context, 'dataset_name', None),
+            'num_questions': total_q,
+            'avg_max_pair_similarity': avg_max,
+            'duplicate_rate_percent': duplicate_rate,
+            'high_similarity_rate_percent': high_sim_rate,
+            'critical_rate_percent': critical_rate,
+            'thresholds': {'warning': thresh_warn, 'critical': thresh_crit}
+        }
+
+        # build summary and findings for audit
+        summary = {'mean_max_similarity': dataset_report.get('avg_max_pair_similarity'), 'high_similarity_count': len([r for r in per_q_reports if r['severity'] in ('warning', 'critical')]), 'thresholds': dataset_report.get('thresholds')}
+        findings = []
+        for q in per_q_reports:
+            ms = q.get('max_similarity', 0.0)
+            if ms >= float(thresh_crit):
+                findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': 'critical', 'reason': 'near_duplicate_options', 'score': ms, 'metadata': {'most_similar_pair': q.get('most_similar_pair')}})
+            elif ms >= float(thresh_warn):
+                findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': 'warning', 'reason': 'similar_options', 'score': ms, 'metadata': {'most_similar_pair': q.get('most_similar_pair')}})
+
+        dataset_report['summary'] = summary
+        dataset_report['findings'] = findings
 
         self._dataset_report = dataset_report
         self._per_question = [r for r in per_q_reports if r['severity'] in ('warning', 'critical')]

@@ -199,6 +199,18 @@ class FleissKappaAgreementDetector(BaseDetector):
         self._low_agreement_questions = full_out.get('_low_questions', [])
         self.q_stats = full_out.get('_q_stats', [])
 
+        # attach summary/findings to full_report
+        try:
+            summary = {'fleiss_kappa': full_report.get('fleiss_kappa'), 'full_agreement_rate': full_report.get('agreement_distribution', {}).get('full_agreement'), 'partial_agreement_rate': full_report.get('agreement_distribution', {}).get('partial_agreement'), 'complete_disagreement_rate': full_report.get('agreement_distribution', {}).get('complete_disagreement')}
+        except Exception:
+            summary = {}
+        findings = []
+        for q in full_out.get('_low_questions', []):
+            sev = 'critical' if q.get('agreement_level') in ('complete_disagreement',) else 'warning'
+            findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': sev, 'reason': 'low_answer_agreement', 'score': q.get('agreement_ratio'), 'metadata': {'vote_distribution': q.get('vote_distribution')}})
+        full_report['summary'] = summary
+        full_report['findings'] = findings
+
         # if no blind-support or not in comparison mode, return full report
         if not getattr(context, 'mode', None) == 'full_vs_blind' or not getattr(self, 'SUPPORTS_COMPARISON', False):
             return full_report
@@ -222,6 +234,25 @@ class FleissKappaAgreementDetector(BaseDetector):
                     delta[f'dist_delta_{key}'] = df - db
         except Exception:
             pass
+
+        # attach summary/findings to blind_report as well
+        try:
+            bsummary = {'fleiss_kappa': blind_report.get('fleiss_kappa'), 'full_agreement_rate': blind_report.get('agreement_distribution', {}).get('full_agreement'), 'partial_agreement_rate': blind_report.get('agreement_distribution', {}).get('partial_agreement'), 'complete_disagreement_rate': blind_report.get('agreement_distribution', {}).get('complete_disagreement')}
+        except Exception:
+            bsummary = {}
+        bfindings = []
+        # blind_out computed earlier; need to recompute low questions locally
+        # If blind_out available from earlier computation, attach its low_questions
+        try:
+            blind_ctx = AnalysisContext(dataset=context.dataset, dataset_name=context.dataset_name, result_paths=context.result_paths, loaded_results=context.blind_results)
+            blind_temp = _compute_for_ctx(blind_ctx)
+            for q in blind_temp.get('_low_questions', []):
+                sev = 'critical' if q.get('agreement_level') in ('complete_disagreement',) else 'warning'
+                bfindings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': sev, 'reason': 'low_answer_agreement', 'score': q.get('agreement_ratio'), 'metadata': {'vote_distribution': q.get('vote_distribution')}})
+        except Exception:
+            pass
+        blind_report['summary'] = bsummary
+        blind_report['findings'] = bfindings
 
         return {'full': full_report, 'blind': blind_report, 'delta': delta}
 

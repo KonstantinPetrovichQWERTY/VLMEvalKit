@@ -169,6 +169,21 @@ class QuestionImageRelevanceDetector(BaseDetector):
         self._low_relevance = [r for r in per_q if r.get('classification') == 'low']
         self._per_question = per_q
 
+        # attach summary and findings
+        summary = {'mean_relevance': report.get('mean_relevance'), 'low_rate_percent': report.get('low_rate_percent'), 'thresholds': report.get('thresholds')}
+        findings = []
+        for q in self._per_question:
+            if q.get('classification') == 'low':
+                findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': 'critical', 'reason': 'low_image_text_relevance', 'score': q.get('similarity')})
+            elif q.get('classification') == 'medium':
+                findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': 'warning', 'reason': 'medium_image_text_relevance', 'score': q.get('similarity')})
+
+        report['summary'] = summary
+        report['findings'] = findings
+
+        # update stored dataset report to include summary/findings
+        self._dataset_report = report
+
         return report
 
     def run(self, context: AnalysisContext, out_dir: str = None, **kwargs):

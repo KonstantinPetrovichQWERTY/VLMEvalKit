@@ -104,10 +104,21 @@ class ConsensusErrorDetector(BaseDetector):
                 participants += [v.get('blind', None) for k, v in ctx.result_paths.items()]
 
             report = {'date_time': f"{datetime.now()}", 'detector': self.NAME, 'participants': participants, 'num_models': num_models, 'num_questions': len(flagged), 'consensus_error_rate': consensus_error_rate, 'unanimous_consensus_error_rate': unanimous_count / float(total_q) if total_q > 0 else 0.0, 'majority_consensus_error_rate': majority_count / float(total_q) if total_q > 0 else 0.0, 'confidence_counts': counts, 'recommendation': 'Manual review of flagged samples is recommended. High/very_high confidence items should be prioritized.'}
-
             result = report
             result['_flagged'] = flagged
             result['_all_q'] = all_q
+            # attach summary and findings
+            try:
+                summary = {'consensus_error_rate': result.get('consensus_error_rate'), 'unanimous_rate': result.get('unanimous_consensus_error_rate'), 'majority_rate': result.get('majority_consensus_error_rate'), 'flagged_count': len(flagged)}
+            except Exception:
+                summary = {}
+            findings = []
+            for q in flagged:
+                sev = 'critical' if q.get('confidence') == 'very_high' else 'warning' if q.get('confidence') == 'high' else 'info'
+                findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': sev, 'reason': 'majority_disagrees_with_ground_truth', 'score': q.get('majority_support'), 'metadata': {'confidence': q.get('confidence')}})
+            result['summary'] = summary
+            result['findings'] = findings
+
             return result
 
         # compute full

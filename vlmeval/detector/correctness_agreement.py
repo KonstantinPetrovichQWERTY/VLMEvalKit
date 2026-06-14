@@ -220,6 +220,21 @@ class CorrectnessAgreementDetector(BaseDetector):
         full_ctx = AnalysisContext(dataset=context.dataset, dataset_name=context.dataset_name, result_paths=context.result_paths, loaded_results=context.full_results)
         full_report = _compute_for_ctx(full_ctx)
 
+        # attach summary and findings to full_report
+        try:
+            summary = {'correctness_kappa': full_report.get('correctness_fleiss_kappa'), 'all_correct_rate': full_report.get('question_outcome_distribution', {}).get('all_correct'), 'all_incorrect_rate': full_report.get('question_outcome_distribution', {}).get('all_incorrect'), 'split_rate': full_report.get('question_outcome_distribution', {}).get('split')}
+        except Exception:
+            summary = {}
+        findings = []
+        for q in full_report.get('_question_details', []):
+            if q.get('consensus') == 'all_incorrect':
+                findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': 'critical', 'reason': 'all_models_incorrect'})
+            elif q.get('consensus') == 'split':
+                findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': 'warning', 'reason': 'split_correctness'})
+
+        full_report['summary'] = summary
+        full_report['findings'] = findings
+
         # if no blind or not supported -> return full
         if not getattr(context, 'mode', None) == 'full_vs_blind' or not getattr(self, 'SUPPORTS_COMPARISON', False):
             # set instance exports

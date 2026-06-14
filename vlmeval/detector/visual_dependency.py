@@ -257,6 +257,21 @@ class VisualDependencyDetector(BaseDetector):
         # cache for run()
         self._per_question = per_question
 
+        # attach summary and findings
+        try:
+            summary = {'average_visual_gain': report.get('average_visual_gain'), 'visual_dependency_score': report.get('visual_dependency_score'), 'category_distribution': report.get('category_distribution')}
+        except Exception:
+            summary = {}
+        findings = []
+        for q in self._per_question:
+            if q.get('category') == 'visual_dependent':
+                findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': 'critical', 'reason': 'visual_dependency', 'score': q.get('visual_gain'), 'metadata': {'full_accuracy': q.get('full_accuracy'), 'blind_accuracy': q.get('blind_accuracy')}})
+            elif q.get('category') == 'visual_supplement':
+                findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': 'warning', 'reason': 'visual_supplement', 'score': q.get('visual_gain')})
+
+        report['summary'] = summary
+        report['findings'] = findings
+
         return report
 
     def run(self, context: AnalysisContext, out_dir: str = None, **kwargs):
