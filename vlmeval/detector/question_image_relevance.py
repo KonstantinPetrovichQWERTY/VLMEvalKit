@@ -1,4 +1,6 @@
 from typing import Dict, Any, List, Optional
+
+from tqdm import tqdm
 from .base_detector import BaseDetector, AnalysisContext, DetectorInputError
 from datetime import datetime
 from pathlib import Path
@@ -86,7 +88,7 @@ class QuestionImageRelevanceDetector(BaseDetector):
         per_q = []
         sims = []
 
-        for idx, row in df.iterrows():
+        for idx, row in tqdm(df.iterrows(), total=len(df)):
             # build text: question + optional hint
             qtext = ''
             if 'question' in row and row['question'] is not None:
@@ -115,22 +117,45 @@ class QuestionImageRelevanceDetector(BaseDetector):
             try:
                 # tokenize text and preprocess image then encode
                 model.eval()
+
+                def _safe_tokenize(tokenizer_fn, text):
+                    # Try direct tokenization, then try truncate flag, then progressively shorten text
+                    try:
+                        return tokenizer_fn([text])
+                    except RuntimeError as e:
+                        # try truncate kwarg if supported
+                        try:
+                            return tokenizer_fn([text], truncate=True)
+                        except Exception:
+                            pass
+                        # progressively shorten the text until tokenization succeeds
+                        lengths = [512, 256, 128, 77, 64, 48, 32, 16]
+                        for L in lengths:
+                            try_text = text[:L]
+                            try:
+                                return tokenizer_fn([try_text])
+                            except Exception:
+                                continue
+                        # re-raise original
+                        raise
+
                 with torch.no_grad():
-                    if kind == 'clip':
-                        image_input = preprocess(img).unsqueeze(0).to(device)
-                        text_input = tokenizer([qtext_full]).to(device)
-                        image_feat = model.encode_image(image_input)
-                        text_feat = model.encode_text(text_input)
-                    else:
-                        # open_clip
-                        image_input = preprocess(img).unsqueeze(0).to(device)
-                        text_tokens = tokenizer([qtext_full])
-                        # tokenizer may produce bytes; convert if necessary
-                        if isinstance(text_tokens, tuple):
-                            text_tokens = text_tokens[0]
-                        text_input = text_tokens.to(device)
-                        image_feat = model.encode_image(image_input)
-                        text_feat = model.encode_text(text_input)
+                    image_input = preprocess(img).unsqueeze(0).to(device)
+
+                    # attempt safe tokenization for both clip and open_clip tokenizers
+                    try:
+                        text_tokens = _safe_tokenize(tokenizer, qtext_full)
+                    except Exception:
+                        # fall back to truncating to a short prefix
+                        text_tokens = tokenizer([qtext_full[:77]]) if hasattr(tokenizer, '__call__') else tokenizer([qtext_full[:77]])
+
+                    # open_clip.tokenizer may return tuple; normalize to tensor
+                    if isinstance(text_tokens, tuple):
+                        text_tokens = text_tokens[0]
+                    text_input = text_tokens.to(device)
+
+                    image_feat = model.encode_image(image_input)
+                    text_feat = model.encode_text(text_input)
 
                     # normalize
                     import numpy as _np
