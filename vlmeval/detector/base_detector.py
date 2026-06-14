@@ -9,12 +9,18 @@ class DetectorInputError(Exception):
 
 
 class AnalysisContext:
-    def __init__(self, dataset, dataset_name, result_paths, config=None, loaded_results=None):
+    def __init__(self, dataset, dataset_name, result_paths, config=None, loaded_results=None, full_results=None, blind_results=None, mode=None):
         self.dataset = dataset
         self.dataset_name = dataset_name
         self.result_paths = result_paths
         self.config = config or {}
+        # legacy single mapping for detectors that expect loaded_results
         self.loaded_results = loaded_results or {}
+        # new explicit mappings
+        self.full_results = full_results or {}
+        self.blind_results = blind_results or {}
+        # execution mode: 'full_only' or 'full_vs_blind'
+        self.mode = mode or ('full_vs_blind' if self.blind_results else 'full_only')
 
 
 class BaseDetector(ABC):
@@ -24,6 +30,13 @@ class BaseDetector(ABC):
     DESCRIPTION = None
 
     DEFAULT_CONFIG = {}
+    
+    # Capability flags (detectors may override)
+    REQUIRES_FULL_RESULTS = True
+    REQUIRES_BLIND_RESULTS = False
+    REQUIRES_MULTIPLE_MODELS = False
+    REQUIRES_CORRECTNESS_LABELS = False
+    SUPPORTS_COMPARISON = False
 
     def __init__(self, context=None, **kwargs):
         self.config = {
@@ -51,13 +64,30 @@ class BaseDetector(ABC):
         result = self.analyze(context=context, **kwargs)
         if out_dir and result is not None:
             try:
-                p = Path(out_dir) / f'{self.NAME}.json'
+                p = Path(out_dir) / 'reports' / f'{self.NAME}.json'
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
             except Exception:
                 # best-effort: do not raise from file-writing issues
                 pass
         return result
+    
+    def can_run(self, context: AnalysisContext):
+        """Return (True, None) if detector can run on the provided context, else (False, reason)."""
+        # check full results
+        if self.REQUIRES_FULL_RESULTS:
+            if not getattr(context, 'full_results', None):
+                return False, 'Full results are required but not provided.'
+        # check blind results
+        if self.REQUIRES_BLIND_RESULTS:
+            if not getattr(context, 'blind_results', None):
+                return False, 'Blind results are required but not provided.'
+        # check multiple models
+        if self.REQUIRES_MULTIPLE_MODELS:
+            rp = getattr(context, 'result_paths', {})
+            if not rp or len(rp) < 2:
+                return False, 'Detector requires results from multiple models.'
+        return True, None
     
     def _normalize_answer(self, a):
         if a is None:

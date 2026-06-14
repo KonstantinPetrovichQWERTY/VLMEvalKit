@@ -84,37 +84,59 @@ def run_pipeline(args):
 
     # Optionally preload evaluation results into memory for detectors
     loaded_results = {}
+    full_results = {}
+    blind_results = {}
     for k, v in result_paths.items():
         try:
             if v.get('eval'):
-                loaded_results[k] = load(v['eval'])
+                loaded = load(v['eval'])
             else:
-                loaded_results[k] = load(v['pred'])
+                loaded = load(v['pred'])
+            loaded_results[k] = loaded
+            full_results[k] = loaded
             # also preload blind variant if present
             if v.get('blind'):
                 try:
                     blind_key = f"{k}__blind"
                     loaded_results[blind_key] = load(v['blind'])
+                    # also map blind result under the base key in blind_results
+                    blind_results[k] = loaded_results[blind_key]
                 except Exception:
                     logger.warning(f'Failed to load blind result for {k}')
         except Exception:
             logger.warning(f'Failed to load result for {k}')
             loaded_results[k] = None
+            full_results[k] = None
 
-    context = AnalysisContext(dataset=dataset, dataset_name=dataset_name, result_paths=result_paths, config=vars(args), loaded_results=loaded_results)
+    # infer execution mode
+    mode = 'full_vs_blind' if len(blind_results) > 0 else 'full_only'
+
+    context = AnalysisContext(dataset=dataset, dataset_name=dataset_name, result_paths=result_paths, config=vars(args), loaded_results=loaded_results, full_results=full_results, blind_results=blind_results, mode=mode)
 
     # Execute detectors
     selected = [d.lower() for d in (args.detectors or ['all'])]
     detector_outputs = {}
     for det_name, det_factory in DETECTORS_REGISTRY.items():
         if 'all' in selected or det_name in selected:
+            det = det_factory()
             try:
-                det = det_factory()
+                can, reason = det.can_run(context)
+            except Exception as e:
+                logger.exception(f'Failed to validate detector {det_name}: {e}')
+                detector_outputs[det_name] = {'executed': False, 'reason': f'Validation error: {e}'}
+                continue
+
+            if not can:
+                detector_outputs[det_name] = {'executed': False, 'reason': reason}
+                logger.info(f'Skipping detector {det_name}: {reason}')
+                continue
+
+            try:
                 det_res = det.run(context, out_dir=str(Path(args.work_dir)))
-                # detector_outputs[det_name] = det_res
+                detector_outputs[det_name] = {'executed': True}
             except Exception as e:
                 logger.exception(f'Detector {det_name} failed: {e}')
-                detector_outputs[det_name] = {'error': str(e)}
+                detector_outputs[det_name] = {'executed': False, 'error': str(e)}
 
     # write aggregated detector outputs
     try:

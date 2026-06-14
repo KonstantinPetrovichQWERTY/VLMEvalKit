@@ -18,8 +18,10 @@ class VisualDependencyDetector(BaseDetector):
         'visual_dependent_blind_thresh': 0.01,
         'visual_supplement_gain_thresh': 0.2,
         'conflicting_gain_thresh': 0.2,
-        'export_max_questions': 1000,
     }
+    REQUIRES_FULL_RESULTS = True
+    REQUIRES_BLIND_RESULTS = True
+    REQUIRES_MULTIPLE_MODELS = True
 
     def _extract_correctness_list(self, res) -> List[int]:
         """Return list of correctness labels per sample: 1,0 or None when unknown."""
@@ -243,13 +245,12 @@ class VisualDependencyDetector(BaseDetector):
             'date_time': f"{datetime.now()}",
             'detector': self.NAME,
             'dataset': getattr(context, 'dataset_name', None),
-            'participants': [v.get('eval', 'unknown') for k, v in context.result_paths.items()],
+            'participants': [v.get('eval', None) for k, v in context.result_paths.items()] + [v.get('blind', None) for k, v in context.result_paths.items()],
             'num_models': num_models,
             'num_questions': included_q,
             'average_visual_gain': avg_gain,
             'category_distribution': dist,
             'visual_dependency_score': visual_dependency_score,
-            'question_details': per_question,
             'warning': 'Requires matching full and blind runs. Agreement computed on evaluation correctness labels.'
         }
 

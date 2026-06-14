@@ -15,8 +15,9 @@ class CorrectnessAgreementDetector(BaseDetector):
     DESCRIPTION = 'Measure inter-model agreement on correctness (correct/incorrect) using Fleiss\' Kappa.'
     DEFAULT_CONFIG = {
         'low_agreement_threshold': None,
-        'export_max_questions': 1000,
     }
+    REQUIRES_MULTIPLE_MODELS = True
+    SUPPORTS_COMPARISON = True
 
     def _fleiss_kappa(self, matrix: List[List[int]]) -> float:
         if not matrix:
@@ -118,131 +119,140 @@ class CorrectnessAgreementDetector(BaseDetector):
         return correctness_by_model, model_keys
 
     def analyze(self, context: AnalysisContext, **kwargs) -> Dict[str, Any]:
-        rp = getattr(context, 'result_paths', {})
-        if not rp or len(rp) < 2:
-            raise DetectorInputError('CorrectnessAgreementDetector requires results from at least two models.')
+        # support computation on a provided context (with loaded_results)
+        def _compute_for_ctx(ctx: AnalysisContext):
+            rp_local = getattr(ctx, 'result_paths', {})
+            if not rp_local or len(rp_local) < 2:
+                raise DetectorInputError('CorrectnessAgreementDetector requires results from at least two models.')
 
-        # Extract correctness labels per model (1=correct,0=incorrect)
-        correctness_by_model, model_keys = self._extract_correctness_by_model(context)
+            correctness_by_model, model_keys = self._extract_correctness_by_model(ctx)
 
-        # Determine number of samples from first model that has data
-        ref = None
-        for k in model_keys:
-            if correctness_by_model.get(k) is not None:
-                ref = correctness_by_model.get(k)
-                break
-        if ref is None:
-            raise DetectorInputError('No extractable correctness labels from provided results.')
-
-        total_q = len(ref)
-        # Build matrix rows only for fully-covered questions (all models have non-None label)
-        matrix: List[List[int]] = []
-        per_question: List[Dict[str, Any]] = []
-        all_correct_ids: List[int] = []
-        all_incorrect_ids: List[int] = []
-        split_ids: List[int] = []
-
-        for i in range(total_q):
-            vals = []
-            qmap = {}
-            skip = False
+            ref = None
             for k in model_keys:
-                arr = correctness_by_model.get(k)
-                if arr is None or i >= len(arr):
-                    skip = True
+                if correctness_by_model.get(k) is not None:
+                    ref = correctness_by_model.get(k)
                     break
-                v = arr[i]
-                if v is None:
-                    skip = True
-                    break
-                vals.append(v)
-                qmap[k] = bool(v)
-            if skip:
-                continue
+            if ref is None:
+                raise DetectorInputError('No extractable correctness labels from provided results.')
 
-            cnt = Counter(vals)
-            num_correct = cnt.get(1, 0)
-            num_incorrect = cnt.get(0, 0)
-            matrix.append([num_correct, num_incorrect])
+            total_q = len(ref)
+            matrix = []
+            per_question = []
+            all_correct_ids = []
+            all_incorrect_ids = []
+            split_ids = []
 
-            # consensus category
-            if num_correct == len(model_keys):
-                consensus = 'all_correct'
-                all_correct_ids.append(i)
-                difficulty = 'easy'
-            elif num_incorrect == len(model_keys):
-                consensus = 'all_incorrect'
-                all_incorrect_ids.append(i)
-                difficulty = 'hard'
-            elif num_correct > num_incorrect:
-                consensus = 'majority_correct'
-                difficulty = 'medium'
-            elif num_incorrect > num_correct:
-                consensus = 'majority_incorrect'
-                difficulty = 'medium'
+            for i in range(total_q):
+                vals = []
+                qmap = {}
+                skip = False
+                for k in model_keys:
+                    arr = correctness_by_model.get(k)
+                    if arr is None or i >= len(arr):
+                        skip = True
+                        break
+                    v = arr[i]
+                    if v is None:
+                        skip = True
+                        break
+                    vals.append(v)
+                    qmap[k] = bool(v)
+                if skip:
+                    continue
+
+                cnt = Counter(vals)
+                num_correct = cnt.get(1, 0)
+                num_incorrect = cnt.get(0, 0)
+                matrix.append([num_correct, num_incorrect])
+
+                if num_correct == len(model_keys):
+                    consensus = 'all_correct'
+                    all_correct_ids.append(i)
+                    difficulty = 'easy'
+                elif num_incorrect == len(model_keys):
+                    consensus = 'all_incorrect'
+                    all_incorrect_ids.append(i)
+                    difficulty = 'hard'
+                elif num_correct > num_incorrect:
+                    consensus = 'majority_correct'
+                    difficulty = 'medium'
+                elif num_incorrect > num_correct:
+                    consensus = 'majority_incorrect'
+                    difficulty = 'medium'
+                else:
+                    consensus = 'split'
+                    split_ids.append(i)
+                    difficulty = 'medium'
+
+                per_question.append({'question_id': i, 'correctness': {k: qmap[k] for k in model_keys}, 'consensus': consensus, 'difficulty_signal': difficulty})
+
+            if len(matrix) == 0:
+                raise DetectorInputError('No fully-covered questions (all models provided correctness labels).')
+
+            kappa = self._fleiss_kappa(matrix)
+            total_included = len(matrix)
+            dist = {'all_correct': 100.0 * len(all_correct_ids) / total_included if total_included > 0 else 0, 'all_incorrect': 100.0 * len(all_incorrect_ids) / total_included if total_included > 0 else 0, 'split': 100.0 * len(split_ids) / total_included if total_included > 0 else 0}
+            solver_consensus = 100.0 * (len(all_correct_ids) + len(all_incorrect_ids)) / total_included if total_included > 0 else 0.0
+
+            participants = [v.get('eval', None) for k, v in ctx.result_paths.items()]
+            if context.mode == 'full_vs_blind':
+                participants += [v.get('blind', None) for k, v in ctx.result_paths.items()]
+
+            report = {'date_time': f"{datetime.now()}", 'detector': self.NAME, 'dataset': getattr(ctx, 'dataset_name', None), 'participants': participants, 'num_models': len(model_keys), 'num_questions': total_included, 'correctness_fleiss_kappa': float(kappa) if (kappa is not None and not math.isnan(kappa)) else None, 'solver_consensus_percent': solver_consensus, 'question_outcome_distribution': dist, 'difficulty_profile': {'easy': len(all_correct_ids), 'medium': total_included - len(all_correct_ids) - len(all_incorrect_ids), 'hard': len(all_incorrect_ids)}, 'warning': 'Agreement computed on evaluation correctness labels. Errors in judging or answer extraction may influence results.'}
+
+            # exports
+            result = report
+            result['_all_correct'] = all_correct_ids
+            result['_all_incorrect'] = all_incorrect_ids
+            result['_split'] = split_ids
+            result['_question_details'] = per_question
+
+            if result['correctness_fleiss_kappa'] is None:
+                result['agreement_score'] = None
+                result['instability_score'] = None
             else:
-                consensus = 'split'
-                split_ids.append(i)
-                difficulty = 'medium'
+                result['agreement_score'] = result['correctness_fleiss_kappa']
+                result['instability_score'] = (1.0 - result['correctness_fleiss_kappa']) / 2.0
 
-            per_question.append({
-                'question_id': i,
-                'correctness': {k: qmap[k] for k in model_keys},
-                'consensus': consensus,
-                'difficulty_signal': difficulty,
-            })
+            return result
 
-        if len(matrix) == 0:
-            raise DetectorInputError('No fully-covered questions (all models provided correctness labels).')
+        # compute full
+        full_ctx = AnalysisContext(dataset=context.dataset, dataset_name=context.dataset_name, result_paths=context.result_paths, loaded_results=context.full_results)
+        full_report = _compute_for_ctx(full_ctx)
 
-        kappa = self._fleiss_kappa(matrix)
+        # if no blind or not supported -> return full
+        if not getattr(context, 'mode', None) == 'full_vs_blind' or not getattr(self, 'SUPPORTS_COMPARISON', False):
+            # set instance exports
+            self._all_correct = full_report.get('_all_correct', [])
+            self._all_incorrect = full_report.get('_all_incorrect', [])
+            self._split = full_report.get('_split', [])
+            self._question_details = full_report.get('_question_details', [])
+            return full_report
 
-        # Aggregate distributions
-        total_included = len(matrix)
-        dist = {
-            'all_correct': 100.0 * len(all_correct_ids) / total_included if total_included > 0 else 0,
-            'all_incorrect': 100.0 * len(all_incorrect_ids) / total_included if total_included > 0 else 0,
-            'split': 100.0 * len(split_ids) / total_included if total_included > 0 else 0,
-        }
+        # compute blind
+        blind_ctx = AnalysisContext(dataset=context.dataset, dataset_name=context.dataset_name, result_paths=context.result_paths, loaded_results=context.blind_results)
+        blind_report = _compute_for_ctx(blind_ctx)
 
-        # Solver consensus score: percent where all models agree (either all_correct or all_incorrect)
-        solver_consensus = 100.0 * (len(all_correct_ids) + len(all_incorrect_ids)) / total_included if total_included > 0 else 0.0
+        delta = {}
+        try:
+            kf = full_report.get('correctness_fleiss_kappa')
+            kb = blind_report.get('correctness_fleiss_kappa')
+            if kf is not None and kb is not None:
+                delta['correctness_kappa_delta'] = kf - kb
+            cf = full_report.get('solver_consensus_percent')
+            cb = blind_report.get('solver_consensus_percent')
+            if cf is not None and cb is not None:
+                delta['consensus_delta'] = cf - cb
+        except Exception:
+            pass
 
-        report = {
-            'date_time': f"{datetime.now()}",
-            'detector': self.NAME,
-            'dataset': getattr(context, 'dataset_name', None),
-            'participants': [v.get('eval', 'unknown') for k, v in context.result_paths.items()],
-            'num_models': len(model_keys),
-            'num_questions': total_included,
-            'correctness_fleiss_kappa': float(kappa) if (kappa is not None and not math.isnan(kappa)) else None,
-            'solver_consensus_percent': solver_consensus,
-            'question_outcome_distribution': dist,
-            'difficulty_profile': {
-                'easy': len(all_correct_ids),
-                'medium': total_included - len(all_correct_ids) - len(all_incorrect_ids),
-                'hard': len(all_incorrect_ids),
-            },
-            'warning': 'Agreement computed on evaluation correctness labels. Errors in judging or answer extraction may influence results.'
-        }
+        # store full exports for run()
+        self._all_correct = full_report.get('_all_correct', [])
+        self._all_incorrect = full_report.get('_all_incorrect', [])
+        self._split = full_report.get('_split', [])
+        self._question_details = full_report.get('_question_details', [])
 
-        # Prepare exports
-        self._all_correct = all_correct_ids
-        self._all_incorrect = all_incorrect_ids
-        self._split = split_ids
-
-        # also store detailed lists for run()
-        self._question_details = per_question
-
-        # Detector scores
-        if report['correctness_fleiss_kappa'] is None:
-            report['agreement_score'] = None
-            report['instability_score'] = None
-        else:
-            report['agreement_score'] = report['correctness_fleiss_kappa']
-            report['instability_score'] = (1.0 - report['correctness_fleiss_kappa']) / 2.0
-
-        return report
+        return {'full': full_report, 'blind': blind_report, 'delta': delta}
 
     def run(self, context: AnalysisContext, out_dir: str = None, **kwargs):
         res = super().run(context, out_dir=out_dir, **kwargs)
@@ -250,18 +260,17 @@ class CorrectnessAgreementDetector(BaseDetector):
             try:
                 rpt_dir = Path(out_dir) / 'reports' / self.NAME
                 rpt_dir.mkdir(parents=True, exist_ok=True)
-                maxq = int(self.config.get('export_max_questions', 1000))
 
                 p_all = rpt_dir / 'all_correct_questions.json'
-                all_entries = [q for q in self._question_details if q['consensus'] == 'all_correct'][:maxq]
+                all_entries = [q for q in self._question_details if q['consensus'] == 'all_correct']
                 p_all.write_text(json.dumps(all_entries, ensure_ascii=False, indent=2), encoding='utf-8')
 
                 p_bad = rpt_dir / 'all_incorrect_questions.json'
-                bad_entries = [q for q in self._question_details if q['consensus'] == 'all_incorrect'][:maxq]
+                bad_entries = [q for q in self._question_details if q['consensus'] == 'all_incorrect']
                 p_bad.write_text(json.dumps(bad_entries, ensure_ascii=False, indent=2), encoding='utf-8')
 
                 p_split = rpt_dir / 'split_questions.json'
-                split_entries = [q for q in self._question_details if q['consensus'] == 'split'][:maxq]
+                split_entries = [q for q in self._question_details if q['consensus'] == 'split']
                 p_split.write_text(json.dumps(split_entries, ensure_ascii=False, indent=2), encoding='utf-8')
                 # write all_stat question-level dump
                 p_all = rpt_dir / 'all_stat.json'
