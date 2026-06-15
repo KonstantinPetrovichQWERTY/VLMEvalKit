@@ -58,7 +58,6 @@ detectors = {
     'correctness_agreement': partial(detector.CorrectnessAgreementDetector,),
     'visual_dependency': partial(detector.VisualDependencyDetector,),
     'distractor_similarity': partial(detector.DistractorSimilarityDetector,),
-    'question_image_relevance': partial(detector.QuestionImageRelevanceDetector,),
 }
 
 ungrouped = {

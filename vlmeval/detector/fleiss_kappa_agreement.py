@@ -196,20 +196,13 @@ class FleissKappaAgreementDetector(BaseDetector):
         full_report = full_out['report']
 
         # preserve full-run exports
-        self._low_agreement_questions = full_out.get('_low_questions', [])
-        self.q_stats = full_out.get('_q_stats', [])
+        self._q_stats = full_out.get('_q_stats', [])
 
-        # attach summary/findings to full_report
-        try:
-            summary = {'fleiss_kappa': full_report.get('fleiss_kappa'), 'full_agreement_rate': full_report.get('agreement_distribution', {}).get('full_agreement'), 'partial_agreement_rate': full_report.get('agreement_distribution', {}).get('partial_agreement'), 'complete_disagreement_rate': full_report.get('agreement_distribution', {}).get('complete_disagreement')}
-        except Exception:
-            summary = {}
         findings = []
         for q in full_out.get('_low_questions', []):
             sev = 'critical' if q.get('agreement_level') in ('complete_disagreement',) else 'warning'
             findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': sev, 'reason': 'low_answer_agreement', 'score': q.get('agreement_ratio'), 'metadata': {'vote_distribution': q.get('vote_distribution')}})
-        full_report['summary'] = summary
-        full_report['findings'] = findings
+        self._full_findings = findings
 
         # if no blind-support or not in comparison mode, return full report
         if not getattr(context, 'mode', None) == 'full_vs_blind' or not getattr(self, 'SUPPORTS_COMPARISON', False):
@@ -219,6 +212,8 @@ class FleissKappaAgreementDetector(BaseDetector):
         blind_ctx = AnalysisContext(dataset=context.dataset, dataset_name=context.dataset_name, result_paths=context.result_paths, loaded_results=context.blind_results)
         blind_out = _compute_for_ctx(blind_ctx)
         blind_report = blind_out['report']
+
+        self._blind_q_stats = full_out.get('_q_stats', [])
 
         delta = {}
         try:
@@ -234,13 +229,8 @@ class FleissKappaAgreementDetector(BaseDetector):
                     delta[f'dist_delta_{key}'] = df - db
         except Exception:
             pass
-
-        # attach summary/findings to blind_report as well
-        try:
-            bsummary = {'fleiss_kappa': blind_report.get('fleiss_kappa'), 'full_agreement_rate': blind_report.get('agreement_distribution', {}).get('full_agreement'), 'partial_agreement_rate': blind_report.get('agreement_distribution', {}).get('partial_agreement'), 'complete_disagreement_rate': blind_report.get('agreement_distribution', {}).get('complete_disagreement')}
-        except Exception:
-            bsummary = {}
-        bfindings = []
+            
+        blind_findings = []
         # blind_out computed earlier; need to recompute low questions locally
         # If blind_out available from earlier computation, attach its low_questions
         try:
@@ -248,27 +238,29 @@ class FleissKappaAgreementDetector(BaseDetector):
             blind_temp = _compute_for_ctx(blind_ctx)
             for q in blind_temp.get('_low_questions', []):
                 sev = 'critical' if q.get('agreement_level') in ('complete_disagreement',) else 'warning'
-                bfindings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': sev, 'reason': 'low_answer_agreement', 'score': q.get('agreement_ratio'), 'metadata': {'vote_distribution': q.get('vote_distribution')}})
+                blind_findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': sev, 'reason': 'low_answer_agreement', 'score': q.get('agreement_ratio'), 'metadata': {'vote_distribution': q.get('vote_distribution')}})
         except Exception:
             pass
-        blind_report['summary'] = bsummary
-        blind_report['findings'] = bfindings
-
+        
+        self._blind_findings = blind_findings
+        
         return {'full': full_report, 'blind': blind_report, 'delta': delta}
 
     def run(self, context, out_dir: str = None, **kwargs):
         # Call base run() to write the main detector report (keeps existing behavior)
         result = super().run(context, out_dir=out_dir, **kwargs)
         # Write low agreement questions file into reports/low_agreement_questions.json
-        if out_dir is not None and hasattr(self, '_low_agreement_questions'):
+        if out_dir is not None:
             try:
                 rpt_dir = Path(out_dir) / 'reports' / self.NAME
                 rpt_dir.mkdir(parents=True, exist_ok=True)
-                p = rpt_dir / 'low_agreement_questions.json'
-                p.write_text(json.dumps(self._low_agreement_questions, ensure_ascii=False, indent=2), encoding='utf-8')
+                p = rpt_dir / f'{self.NAME}_findings.json'
+                p.write_text(json.dumps({"findings": self._full_findings + self._blind_findings, "detector" : self.NAME}, ensure_ascii=False, indent=2), encoding='utf-8')
                 
-                p_all = rpt_dir / 'all_stat.json'
-                p_all.write_text(json.dumps(self.q_stats, ensure_ascii=False, indent=2), encoding='utf-8')
+                p_all = rpt_dir / 'all_full_infer_stat.json'
+                p_all.write_text(json.dumps(self._q_stats, ensure_ascii=False, indent=2), encoding='utf-8')
+                p_all_blind = rpt_dir / 'all_blind_infer_stat.json'
+                p_all_blind.write_text(json.dumps(self._blind_q_stats, ensure_ascii=False, indent=2), encoding='utf-8')
             except Exception:
                 logger.exception('Failed to write low_agreement_questions.json')
         return result

@@ -179,11 +179,7 @@ class CorrectnessAgreementDetector(BaseDetector):
                 elif num_incorrect > num_correct:
                     consensus = 'majority_incorrect'
                     difficulty = 'medium'
-                else:
-                    consensus = 'split'
-                    split_ids.append(i)
-                    difficulty = 'medium'
-
+                
                 per_question.append({'question_id': i, 'correctness': {k: qmap[k] for k in model_keys}, 'consensus': consensus, 'difficulty_signal': difficulty})
 
             if len(matrix) == 0:
@@ -202,9 +198,6 @@ class CorrectnessAgreementDetector(BaseDetector):
 
             # exports
             result = report
-            result['_all_correct'] = all_correct_ids
-            result['_all_incorrect'] = all_incorrect_ids
-            result['_split'] = split_ids
             result['_question_details'] = per_question
 
             if result['correctness_fleiss_kappa'] is None:
@@ -220,11 +213,6 @@ class CorrectnessAgreementDetector(BaseDetector):
         full_ctx = AnalysisContext(dataset=context.dataset, dataset_name=context.dataset_name, result_paths=context.result_paths, loaded_results=context.full_results)
         full_report = _compute_for_ctx(full_ctx)
 
-        # attach summary and findings to full_report
-        try:
-            summary = {'correctness_kappa': full_report.get('correctness_fleiss_kappa'), 'all_correct_rate': full_report.get('question_outcome_distribution', {}).get('all_correct'), 'all_incorrect_rate': full_report.get('question_outcome_distribution', {}).get('all_incorrect'), 'split_rate': full_report.get('question_outcome_distribution', {}).get('split')}
-        except Exception:
-            summary = {}
         findings = []
         for q in full_report.get('_question_details', []):
             if q.get('consensus') == 'all_incorrect':
@@ -232,21 +220,26 @@ class CorrectnessAgreementDetector(BaseDetector):
             elif q.get('consensus') == 'split':
                 findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': 'warning', 'reason': 'split_correctness'})
 
-        full_report['summary'] = summary
-        full_report['findings'] = findings
+        self._full_findings = findings
 
         # if no blind or not supported -> return full
         if not getattr(context, 'mode', None) == 'full_vs_blind' or not getattr(self, 'SUPPORTS_COMPARISON', False):
             # set instance exports
-            self._all_correct = full_report.get('_all_correct', [])
-            self._all_incorrect = full_report.get('_all_incorrect', [])
-            self._split = full_report.get('_split', [])
             self._question_details = full_report.get('_question_details', [])
             return full_report
 
         # compute blind
         blind_ctx = AnalysisContext(dataset=context.dataset, dataset_name=context.dataset_name, result_paths=context.result_paths, loaded_results=context.blind_results)
         blind_report = _compute_for_ctx(blind_ctx)
+
+        blind_findings = []
+        for q in blind_report.get('_question_details', []):
+            if q.get('consensus') == 'all_incorrect':
+                blind_findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': 'critical', 'reason': 'all_models_incorrect'})
+            elif q.get('consensus') == 'split':
+                blind_findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': 'warning', 'reason': 'split_correctness'})
+
+        self._blind_findings = blind_findings
 
         delta = {}
         try:
@@ -261,35 +254,25 @@ class CorrectnessAgreementDetector(BaseDetector):
         except Exception:
             pass
 
-        # store full exports for run()
-        self._all_correct = full_report.get('_all_correct', [])
-        self._all_incorrect = full_report.get('_all_incorrect', [])
-        self._split = full_report.get('_split', [])
-        self._question_details = full_report.get('_question_details', [])
+        self._full_question_details = full_report.get('_question_details', [])
+        self._blind_question_details = blind_report.get('_question_details', [])
 
-        return {'full': full_report, 'blind': blind_report, 'delta': delta}
+        return {'full': {k: v for k, v in full_report.items() if k != '_question_details'}, 'blind': {k: v for k, v in blind_report.items() if k != '_question_details'}, 'delta': delta}
 
     def run(self, context: AnalysisContext, out_dir: str = None, **kwargs):
         res = super().run(context, out_dir=out_dir, **kwargs)
-        if out_dir and hasattr(self, '_question_details'):
+        if out_dir:
             try:
                 rpt_dir = Path(out_dir) / 'reports' / self.NAME
                 rpt_dir.mkdir(parents=True, exist_ok=True)
 
-                p_all = rpt_dir / 'all_correct_questions.json'
-                all_entries = [q for q in self._question_details if q['consensus'] == 'all_correct']
-                p_all.write_text(json.dumps(all_entries, ensure_ascii=False, indent=2), encoding='utf-8')
+                p_findings = rpt_dir / f'{self.NAME}_findings.json'
+                p_findings.write_text(json.dumps({"findings": self.merge_findings(self._full_findings, self._blind_findings), "detector" : self.NAME}, ensure_ascii=False, indent=2), encoding='utf-8')
 
-                p_bad = rpt_dir / 'all_incorrect_questions.json'
-                bad_entries = [q for q in self._question_details if q['consensus'] == 'all_incorrect']
-                p_bad.write_text(json.dumps(bad_entries, ensure_ascii=False, indent=2), encoding='utf-8')
-
-                p_split = rpt_dir / 'split_questions.json'
-                split_entries = [q for q in self._question_details if q['consensus'] == 'split']
-                p_split.write_text(json.dumps(split_entries, ensure_ascii=False, indent=2), encoding='utf-8')
-                # write all_stat question-level dump
-                p_all = rpt_dir / 'all_stat.json'
-                p_all.write_text(json.dumps(self._question_details, ensure_ascii=False, indent=2), encoding='utf-8')
+                p_all = rpt_dir / 'full_infer_all_stat.json'
+                p_all.write_text(json.dumps(self._full_question_details, ensure_ascii=False, indent=2), encoding='utf-8')
+                p_all_blind = rpt_dir / 'blind_infer_all_stat.json'
+                p_all_blind.write_text(json.dumps(self._blind_question_details, ensure_ascii=False, indent=2), encoding='utf-8')
             except Exception:
                 logger.exception('Failed to write correctness agreement reports')
         return res

@@ -257,11 +257,6 @@ class VisualDependencyDetector(BaseDetector):
         # cache for run()
         self._per_question = per_question
 
-        # attach summary and findings
-        try:
-            summary = {'average_visual_gain': report.get('average_visual_gain'), 'visual_dependency_score': report.get('visual_dependency_score'), 'category_distribution': report.get('category_distribution')}
-        except Exception:
-            summary = {}
         findings = []
         for q in self._per_question:
             if q.get('category') == 'visual_dependent':
@@ -269,30 +264,19 @@ class VisualDependencyDetector(BaseDetector):
             elif q.get('category') == 'visual_supplement':
                 findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': 'warning', 'reason': 'visual_supplement', 'score': q.get('visual_gain')})
 
-        report['summary'] = summary
-        report['findings'] = findings
+        self._findings = findings
 
         return report
 
     def run(self, context: AnalysisContext, out_dir: str = None, **kwargs):
         res = super().run(context, out_dir=out_dir, **kwargs)
-        if out_dir and hasattr(self, '_per_question'):
+        if out_dir:
             try:
                 rpt_dir = Path(out_dir) / 'reports' / self.NAME
                 rpt_dir.mkdir(parents=True, exist_ok=True)
-                p = rpt_dir / 'visual_dependency.json'
-                p.write_text(json.dumps(self._per_question, ensure_ascii=False, indent=2), encoding='utf-8')
+                p = rpt_dir / f'{self.NAME}_findings.json'
+                p.write_text(json.dumps({"findings": self._findings, "detector" : self.NAME}, ensure_ascii=False, indent=2), encoding='utf-8')
 
-                # export category files
-                cats = {'visual_dependent': [], 'visual_supplement': [], 'text_only': [], 'conflicting_visual_signal': []}
-                for q in self._per_question:
-                    cats[q['category']].append(q)
-
-                (rpt_dir / 'visual_dependent_questions.json').write_text(json.dumps(cats['visual_dependent'], ensure_ascii=False, indent=2), encoding='utf-8')
-                (rpt_dir / 'visual_supplement_questions.json').write_text(json.dumps(cats['visual_supplement'], ensure_ascii=False, indent=2), encoding='utf-8')
-                (rpt_dir / 'text_only_questions.json').write_text(json.dumps(cats['text_only'], ensure_ascii=False, indent=2), encoding='utf-8')
-                (rpt_dir / 'conflicting_visual_signal_questions.json').write_text(json.dumps(cats['conflicting_visual_signal'], ensure_ascii=False, indent=2), encoding='utf-8')
-                # write consolidated question-level statistics file
                 p_all = rpt_dir / 'all_stat.json'
                 p_all.write_text(json.dumps(self._per_question, ensure_ascii=False, indent=2), encoding='utf-8')
             except Exception:

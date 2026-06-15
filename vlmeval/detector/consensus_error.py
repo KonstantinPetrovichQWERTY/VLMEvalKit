@@ -107,33 +107,39 @@ class ConsensusErrorDetector(BaseDetector):
             result = report
             result['_flagged'] = flagged
             result['_all_q'] = all_q
-            # attach summary and findings
-            try:
-                summary = {'consensus_error_rate': result.get('consensus_error_rate'), 'unanimous_rate': result.get('unanimous_consensus_error_rate'), 'majority_rate': result.get('majority_consensus_error_rate'), 'flagged_count': len(flagged)}
-            except Exception:
-                summary = {}
-            findings = []
-            for q in flagged:
-                sev = 'critical' if q.get('confidence') == 'very_high' else 'warning' if q.get('confidence') == 'high' else 'info'
-                findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': sev, 'reason': 'majority_disagrees_with_ground_truth', 'score': q.get('majority_support'), 'metadata': {'confidence': q.get('confidence')}})
-            result['summary'] = summary
-            result['findings'] = findings
 
             return result
 
         # compute full
         full_ctx = AnalysisContext(dataset=context.dataset, dataset_name=context.dataset_name, result_paths=context.result_paths, loaded_results=context.full_results)
         full_report = _compute_for_ctx(full_ctx)
+        # attach summary and findings for full report
+        findings = []
+        for q in full_report.get('_flagged', []):
+            sev = 'critical' if q.get('confidence') == 'very_high' else 'warning' if q.get('confidence') == 'high' else 'info'
+            findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': sev, 'reason': 'majority_disagrees_with_ground_truth', 'score': q.get('majority_support'), 
+                             'metadata': {'confidence': q.get('confidence'), 'ground_truth': q.get("ground_truth"), 'majority_answer': q.get("majority_answer"), 'confidence': q.get("confidence"), 'answers': q.get("answers")}})
 
-        # if no blind or comparison unsupported -> store and return full
+        # store for run()/exports
+        self._all_questions = full_report.get('_all_q', [])
+        self._full_findings = findings
+
+        # if no blind or comparison unsupported -> return full
         if not getattr(context, 'mode', None) == 'full_vs_blind' or not getattr(self, 'SUPPORTS_COMPARISON', False):
-            self._flagged_questions = full_report.get('_flagged', [])
-            self._all_questions = full_report.get('_all_q', [])
-            return full_report
+            return {k:v for k, v in full_report.items() if k not in ['_flagged', '_all_q']}
 
         # compute blind
         blind_ctx = AnalysisContext(dataset=context.dataset, dataset_name=context.dataset_name, result_paths=context.result_paths, loaded_results=context.blind_results)
         blind_report = _compute_for_ctx(blind_ctx)
+
+        # attach summary/findings to blind_report
+        bfindings = []
+        for q in blind_report.get('_flagged', []):
+            sev = 'critical' if q.get('confidence') == 'very_high' else 'warning' if q.get('confidence') == 'high' else 'info'
+            bfindings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': sev, 'reason': 'majority_disagrees_with_ground_truth', 'score': q.get('majority_support'), 
+                              'metadata': {'confidence': q.get('confidence'), 'ground_truth': q.get("ground_truth"), 'majority_answer': q.get("majority_answer"), 'confidence': q.get("confidence"), 'answers': q.get("answers")}})
+        self._blind_all_questions = blind_report.get('_all_q', [])
+        self._blind_findings = bfindings
 
         # compute set differences
         full_ids = set([q['question_id'] for q in full_report.get('_flagged', [])])
@@ -144,43 +150,22 @@ class ConsensusErrorDetector(BaseDetector):
 
         delta = {'full_only_count': len(full_only), 'blind_only_count': len(blind_only), 'shared_count': len(shared)}
 
-        # store full/blind flagged for run()
-        self._flagged_questions = full_report.get('_flagged', [])
-        self._blind_flagged = blind_report.get('_flagged', [])
-        self._all_questions = full_report.get('_all_q', [])
-
         return {'full': full_report, 'blind': blind_report, 'delta': delta}
 
     def run(self, context: AnalysisContext, out_dir: str = None, **kwargs):
         res = super().run(context, out_dir=out_dir, **kwargs)
-        if out_dir and hasattr(self, '_flagged_questions'):
+        if out_dir:
             try:
                 rpt_dir = Path(out_dir) / 'reports' / self.NAME
                 rpt_dir.mkdir(parents=True, exist_ok=True)
                 
-                p = rpt_dir / 'consensus_errors.json'
-                p.write_text(json.dumps(self._flagged_questions, ensure_ascii=False, indent=2), encoding='utf-8')
-
-                p_all = rpt_dir / 'all_stat.json'
+                p_all = rpt_dir / 'all_stat_full.json'
                 p_all.write_text(json.dumps(self._all_questions, ensure_ascii=False, indent=2), encoding='utf-8')
-                # if blind results were computed, write separate files
-                if hasattr(self, '_blind_flagged'):
-                    p_full = rpt_dir / 'full_consensus_errors.json'
-                    p_full.write_text(json.dumps(self._flagged_questions, ensure_ascii=False, indent=2), encoding='utf-8')
-                    p_blind = rpt_dir / 'blind_consensus_errors.json'
-                    p_blind.write_text(json.dumps(self._blind_flagged, ensure_ascii=False, indent=2), encoding='utf-8')
-                    # compute shared and visual-only
-                    full_ids = set([q['question_id'] for q in self._flagged_questions])
-                    blind_ids = set([q['question_id'] for q in self._blind_flagged])
-                    shared_ids = full_ids.intersection(blind_ids)
-                    full_only_ids = full_ids - blind_ids
-                    blind_only_ids = blind_ids - full_ids
-                    shared = [q for q in self._flagged_questions if q['question_id'] in shared_ids]
-                    full_only = [q for q in self._flagged_questions if q['question_id'] in full_only_ids]
-                    blind_only = [q for q in self._blind_flagged if q['question_id'] in blind_only_ids]
-                    (rpt_dir / 'shared_consensus_errors.json').write_text(json.dumps(shared, ensure_ascii=False, indent=2), encoding='utf-8')
-                    (rpt_dir / 'visual_consensus_errors.json').write_text(json.dumps(full_only, ensure_ascii=False, indent=2), encoding='utf-8')
-                    (rpt_dir / 'blind_only_consensus_errors.json').write_text(json.dumps(blind_only, ensure_ascii=False, indent=2), encoding='utf-8')
+                p_all_blind = rpt_dir / 'all_stat_blind.json'
+                p_all_blind.write_text(json.dumps(self._blind_all_questions, ensure_ascii=False, indent=2), encoding='utf-8')
+
+                p_findings = rpt_dir / f'{self.NAME}_findings.json'
+                p_findings.write_text(json.dumps({"findings": self.merge_findings(self._full_findings, self._blind_findings), "detector" : self.NAME}, ensure_ascii=False, indent=2), encoding='utf-8')
             except Exception:
                 logger.exception('Failed to write consensus_errors.json')
         return res

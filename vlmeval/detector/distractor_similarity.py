@@ -207,31 +207,28 @@ class DistractorSimilarityDetector(BaseDetector):
         }
 
         # build summary and findings for audit
-        summary = {'mean_max_similarity': dataset_report.get('avg_max_pair_similarity'), 'high_similarity_count': len([r for r in per_q_reports if r['severity'] in ('warning', 'critical')]), 'thresholds': dataset_report.get('thresholds')}
         findings = []
         for q in per_q_reports:
             ms = q.get('max_similarity', 0.0)
-            if ms >= float(thresh_crit):
+            if ms >= float(1.0):
+                findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': 'duplicate', 'reason': 'duplicate_options', 'score': ms, 'metadata': {'duplicate_options': q.get('most_similar_pair')}})
+            elif ms >= float(thresh_crit):
                 findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': 'critical', 'reason': 'near_duplicate_options', 'score': ms, 'metadata': {'most_similar_pair': q.get('most_similar_pair')}})
             elif ms >= float(thresh_warn):
                 findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': 'warning', 'reason': 'similar_options', 'score': ms, 'metadata': {'most_similar_pair': q.get('most_similar_pair')}})
 
-        dataset_report['summary'] = summary
-        dataset_report['findings'] = findings
-
-        self._dataset_report = dataset_report
-        self._per_question = [r for r in per_q_reports if r['severity'] in ('warning', 'critical')]
+        self._findings = findings
         self._all_stat = per_q_reports
 
         return dataset_report
 
     def run(self, context: AnalysisContext, out_dir: str = None, **kwargs):
         res = super().run(context, out_dir=out_dir, **kwargs)
-        if out_dir and hasattr(self, '_dataset_report'):
+        if out_dir:
             try:
                 rpt_dir = Path(out_dir) / 'reports' / self.NAME
                 rpt_dir.mkdir(parents=True, exist_ok=True)
-                (rpt_dir / 'high_similarity_questions.json').write_text(json.dumps(self._per_question, ensure_ascii=False, indent=2), encoding='utf-8')
+                (rpt_dir / f'{self.NAME}_findings.json').write_text(json.dumps({"findings": self._findings, "detector" : self.NAME}, ensure_ascii=False, indent=2), encoding='utf-8')
                 
                 (rpt_dir / 'all_stat.json').write_text(json.dumps(self._all_stat, ensure_ascii=False, indent=2), encoding='utf-8')
             except Exception:

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from pathlib import Path
 import json
 import string
@@ -248,3 +249,27 @@ class BaseDetector(ABC):
                 answers_by_model[k] = None
                 
         return answers_by_model, model_keys
+
+
+    def merge_findings(self, full_list, blind_list):
+        merged = defaultdict(lambda: {"full": None, "blind": None})
+        
+        for item in full_list:
+            qid = item["question_id"]
+            merged[qid]["full"] = {k: v for k, v in item.items() if k != "question_id"}
+        
+        for item in blind_list:
+            qid = item["question_id"]
+            merged[qid]["blind"] = {k: v for k, v in item.items() if k != "question_id"}
+        
+        result = []
+        for qid, data in merged.items():
+            entry = {"question_id": qid}
+            if data["full"]:
+                entry["full"] = data["full"]
+            if data["blind"]:
+                entry["blind"] = data["blind"]
+            result.append(entry)
+        
+        result.sort(key=lambda x: x["question_id"])
+        return result

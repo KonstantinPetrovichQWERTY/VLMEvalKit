@@ -144,14 +144,6 @@ class AnswerOptionsDistributionDetector(BaseDetector):
                 'Consider CircularEval-style evaluation to mitigate position biases.'
             ])
 
-        # Add summary and findings for audit layer
-        # (keeps existing fields intact)
-        summary = {
-            'answer_distribution': {k: v * 100.0 for k, v in dist.items()},
-            'most_frequent_option': max(dist.items(), key=lambda x: x[1])[0] if dist else None,
-            'imbalance_score': float(score)
-        }
-
         findings = []
         if score > 0.2:
             findings.append({'question_id': None, 'detector': self.NAME, 'severity': 'critical', 'reason': 'strong_option_imbalance', 'metadata': {'score': float(score)}})
@@ -171,7 +163,6 @@ class AnswerOptionsDistributionDetector(BaseDetector):
                 'kl_divergence': float(kl),
                 'recommendation': rec
             },
-            'summary': summary,
             'findings': findings
         }
 

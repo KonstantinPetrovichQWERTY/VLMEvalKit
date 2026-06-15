@@ -27,7 +27,7 @@ class BenchmarkAuditReportGenerator:
 
         # collect findings from any JSON files that include a 'findings' key
         findings_list = []
-        for p in rpt_dir.rglob('*.json'):
+        for p in rpt_dir.rglob('*_findings.json'):
             try:
                 data = json.loads(p.read_text(encoding='utf-8'))
             except Exception:
@@ -36,19 +36,15 @@ class BenchmarkAuditReportGenerator:
             if isinstance(data, dict):
                 # direct findings
                 if 'findings' in data and isinstance(data.get('findings'), list):
-                    det = data.get('detector') or p.parent.name
                     for f in data.get('findings'):
                         f_rec = dict(f)
-                        f_rec.setdefault('detector', det)
                         findings_list.append(f_rec)
                 # comparison-style reports may have nested 'full'/'blind' entries containing findings
                 else:
                     for side in ('full', 'blind'):
                         if side in data and isinstance(data[side], dict) and 'findings' in data[side] and isinstance(data[side].get('findings'), list):
-                            det = data[side].get('detector') or (p.parent.name + f"/{side}")
                             for f in data[side].get('findings'):
                                 f_rec = dict(f)
-                                f_rec.setdefault('detector', det)
                                 f_rec.setdefault('comparison_side', side)
                                 findings_list.append(f_rec)
 
@@ -100,7 +96,7 @@ class BenchmarkAuditReportGenerator:
         md_lines.append('')
 
         # Top critical questions
-        md_lines.append('## Top Critical Questions')
+        md_lines.append('## Top 20 Critical Questions')
         criticals = [f for f in findings_list if f.get('severity') == 'critical']
         # group by question id
         crit_by_q = defaultdict(list)
@@ -109,7 +105,7 @@ class BenchmarkAuditReportGenerator:
             crit_by_q[qid].append(f)
         top_q = sorted(crit_by_q.items(), key=lambda x: len(x[1]) if x[0] is not None else 0, reverse=True)[:20]
         for qid, flist in top_q:
-            md_lines.append(f'- Question `{qid}`: {len(flist)} critical findings (see aggregated_findings.json)')
+            md_lines.append(f'- Question `{qid}`: {len(flist)} critical findings')
         md_lines.append('')
 
         md_lines.append('## Notes')
