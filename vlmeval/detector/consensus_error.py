@@ -150,7 +150,7 @@ class ConsensusErrorDetector(BaseDetector):
 
         delta = {'full_only_count': len(full_only), 'blind_only_count': len(blind_only), 'shared_count': len(shared)}
 
-        return {'full': full_report, 'blind': blind_report, 'delta': delta}
+        return {'full': {k: v for k, v in full_report.items() if k not in ['_flagged', '_all_q']}, 'blind': {k: v for k, v in blind_report.items() if k not in ['_flagged', '_all_q']}, 'delta': delta}
 
     def run(self, context: AnalysisContext, out_dir: str = None, **kwargs):
         res = super().run(context, out_dir=out_dir, **kwargs)
@@ -159,9 +159,9 @@ class ConsensusErrorDetector(BaseDetector):
                 rpt_dir = Path(out_dir) / 'reports' / self.NAME
                 rpt_dir.mkdir(parents=True, exist_ok=True)
                 
-                p_all = rpt_dir / 'all_stat_full.json'
+                p_all = rpt_dir / 'all_full_infer_stat.json'
                 p_all.write_text(json.dumps(self._all_questions, ensure_ascii=False, indent=2), encoding='utf-8')
-                p_all_blind = rpt_dir / 'all_stat_blind.json'
+                p_all_blind = rpt_dir / 'all_blind_infer_stat.json'
                 p_all_blind.write_text(json.dumps(self._blind_all_questions, ensure_ascii=False, indent=2), encoding='utf-8')
 
                 p_findings = rpt_dir / f'{self.NAME}_findings.json'

@@ -255,7 +255,7 @@ class FleissKappaAgreementDetector(BaseDetector):
                 rpt_dir = Path(out_dir) / 'reports' / self.NAME
                 rpt_dir.mkdir(parents=True, exist_ok=True)
                 p = rpt_dir / f'{self.NAME}_findings.json'
-                p.write_text(json.dumps({"findings": self._full_findings + self._blind_findings, "detector" : self.NAME}, ensure_ascii=False, indent=2), encoding='utf-8')
+                p.write_text(json.dumps({"findings": self.merge_findings(self._full_findings, self._blind_findings), "detector" : self.NAME}, ensure_ascii=False, indent=2), encoding='utf-8')
                 
                 p_all = rpt_dir / 'all_full_infer_stat.json'
                 p_all.write_text(json.dumps(self._q_stats, ensure_ascii=False, indent=2), encoding='utf-8')

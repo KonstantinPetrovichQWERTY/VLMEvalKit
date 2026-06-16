@@ -269,9 +269,9 @@ class CorrectnessAgreementDetector(BaseDetector):
                 p_findings = rpt_dir / f'{self.NAME}_findings.json'
                 p_findings.write_text(json.dumps({"findings": self.merge_findings(self._full_findings, self._blind_findings), "detector" : self.NAME}, ensure_ascii=False, indent=2), encoding='utf-8')
 
-                p_all = rpt_dir / 'full_infer_all_stat.json'
+                p_all = rpt_dir / 'all_full_infer_stat.json'
                 p_all.write_text(json.dumps(self._full_question_details, ensure_ascii=False, indent=2), encoding='utf-8')
-                p_all_blind = rpt_dir / 'blind_infer_all_stat.json'
+                p_all_blind = rpt_dir / 'all_blind_infer_stat.json'
                 p_all_blind.write_text(json.dumps(self._blind_question_details, ensure_ascii=False, indent=2), encoding='utf-8')
             except Exception:
                 logger.exception('Failed to write correctness agreement reports')
