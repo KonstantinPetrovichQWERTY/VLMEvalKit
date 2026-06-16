@@ -6,17 +6,18 @@ from .base_detector import AnalysisContext, BaseDetector, DetectorInputError
 from datetime import datetime
 import math
 from vlmeval.smp.file import get_logger
+
 logger = get_logger(__name__)
 from pathlib import Path
 import json
 
 
 class FleissKappaAgreementDetector(BaseDetector):
-    NAME = 'fleiss_kappa_agreement'
-    DESCRIPTION = 'Measure inter-model agreement using Fleiss\' Kappa.'
+    NAME = "fleiss_kappa_agreement"
+    DESCRIPTION = "Measure inter-model agreement using Fleiss' Kappa."
     DEFAULT_CONFIG = {
-        'full_threshold': 1.0,
-        'complete_threshold': 1,  # max_count == 1 => complete disagreement
+        "full_threshold": 1.0,
+        "complete_threshold": 1,  # max_count == 1 => complete disagreement
     }
     REQUIRES_MULTIPLE_MODELS = True
     SUPPORTS_COMPARISON = True
@@ -24,11 +25,11 @@ class FleissKappaAgreementDetector(BaseDetector):
     def _fleiss_kappa(self, matrix: List[List[int]]) -> float:
         # matrix: rows=subjects, cols=categories, entries=counts; n raters per subject
         if not matrix:
-            return float('nan')
+            return float("nan")
         N = len(matrix)
         n = sum(matrix[0])
         if n <= 1:
-            return float('nan')
+            return float("nan")
         # p_j
         k = len(matrix[0])
         p = [0.0] * k
@@ -44,26 +45,32 @@ class FleissKappaAgreementDetector(BaseDetector):
         P_bar = sum(P) / N
         P_e = sum(x * x for x in p)
         if (1 - P_e) == 0:
-            return float('nan')
+            return float("nan")
         kappa = (P_bar - P_e) / (1 - P_e)
         return float(kappa)
 
     def analyze(self, context: AnalysisContext, **kwargs) -> Dict[str, Any]:
         # helper that computes report for a given AnalysisContext (allows full/blind)
         def _compute_for_ctx(ctx: AnalysisContext):
-            rp_local = getattr(ctx, 'result_paths', {})
+            rp_local = getattr(ctx, "result_paths", {})
             if not rp_local or len(rp_local) < 2:
-                raise DetectorInputError('FleissKappaAgreementDetector requires results from at least two models.')
+                raise DetectorInputError(
+                    "FleissKappaAgreementDetector requires results from at least two models."
+                )
 
-            dataset = getattr(ctx, 'dataset')
-            if dataset.TYPE != 'MCQ':
-                raise DetectorInputError('FleissKappaAgreementDetector only supports MCQ datasets.')
+            dataset = getattr(ctx, "dataset")
+            if dataset.TYPE != "MCQ":
+                raise DetectorInputError(
+                    "FleissKappaAgreementDetector only supports MCQ datasets."
+                )
 
             answers_by_model, model_keys = self._get_answers_by_model(ctx)
 
             lengths = [len(v) for v in answers_by_model.values() if v is not None]
             if not lengths:
-                raise DetectorInputError('No extractable answers from provided results.')
+                raise DetectorInputError(
+                    "No extractable answers from provided results."
+                )
             num_samples = max(lengths)
 
             matrix = []
@@ -89,18 +96,22 @@ class FleissKappaAgreementDetector(BaseDetector):
                 counts_map = {}
                 for v in answers.values():
                     counts_map[v] = counts_map.get(v, 0) + 1
-                per_question_details.append({'idx': idx, 'answers': answers, 'counts_map': counts_map})
+                per_question_details.append(
+                    {"idx": idx, "answers": answers, "counts_map": counts_map}
+                )
 
             all_categories = sorted(categories_set)
             if not all_categories:
-                raise DetectorInputError('No answer categories found across models.')
+                raise DetectorInputError("No answer categories found across models.")
 
             for q in per_question_details:
-                row = [q['counts_map'].get(cat, 0) for cat in all_categories]
+                row = [q["counts_map"].get(cat, 0) for cat in all_categories]
                 matrix.append(row)
 
             if len(matrix) == 0:
-                raise DetectorInputError('No fully-covered questions (all models answered).')
+                raise DetectorInputError(
+                    "No fully-covered questions (all models answered)."
+                )
 
             kappa = self._fleiss_kappa(matrix)
 
@@ -110,19 +121,31 @@ class FleissKappaAgreementDetector(BaseDetector):
             for i, row in enumerate(matrix):
                 max_count = max(row)
                 if max_count == n_raters:
-                    level = 'full'
+                    level = "full"
                     full += 1
                 elif max_count == 1:
-                    level = 'complete'
+                    level = "complete"
                     complete += 1
                 else:
-                    level = 'partial'
+                    level = "partial"
                     partial += 1
                 q = per_question_details[i]
-                q_stats_local.append({'question_idx': q['idx'], 'answers': q['answers'], 'agreement_level': level})
+                q_stats_local.append(
+                    {
+                        "question_idx": q["idx"],
+                        "answers": q["answers"],
+                        "agreement_level": level,
+                    }
+                )
 
             total_q = len(matrix)
-            dist = {'full_agreement': 100.0 * full / total_q if total_q > 0 else 0, 'partial_agreement': 100.0 * partial / total_q if total_q > 0 else 0, 'complete_disagreement': 100.0 * complete / total_q if total_q > 0 else 0}
+            dist = {
+                "full_agreement": 100.0 * full / total_q if total_q > 0 else 0,
+                "partial_agreement": 100.0 * partial / total_q if total_q > 0 else 0,
+                "complete_disagreement": (
+                    100.0 * complete / total_q if total_q > 0 else 0
+                ),
+            }
 
             pairwise = {}
             for i, k1 in enumerate(model_keys):
@@ -146,105 +169,198 @@ class FleissKappaAgreementDetector(BaseDetector):
                             agree += 1
                     pairwise[k1][k2] = (agree / total) if total > 0 else None
 
+            participants = [v.get("eval", None) for k, v in ctx.result_paths.items()]
+            if context.mode == "full_vs_blind":
+                participants += [
+                    v.get("blind", None) for k, v in ctx.result_paths.items()
+                ]
 
-            participants = [v.get('eval', None) for k, v in ctx.result_paths.items()]
-            if context.mode == 'full_vs_blind':
-                participants += [v.get('blind', None) for k, v in ctx.result_paths.items()]
+            report = {
+                "date_time": f"{datetime.now()}",
+                "detector": self.NAME,
+                "dataset": getattr(ctx, "dataset_name", None),
+                "participants": participants,
+                "num_questions": total_q,
+                "num_models": n_raters,
+                "fleiss_kappa": (
+                    float(kappa)
+                    if (kappa is not None and not math.isnan(kappa))
+                    else None
+                ),
+                "agreement_distribution": dist,
+                "pairwise_agreement": pairwise,
+                "warning": 'Agreement computed on MCQ option letters (A/B/C/D/...). Predictions without clear options are marked as "Z" (unknown).',
+            }
 
-            report = {'date_time': f"{datetime.now()}", 'detector': self.NAME, 'dataset': getattr(ctx, 'dataset_name', None), 'participants': participants, 'num_questions': total_q, 'num_models': n_raters, 'fleiss_kappa': float(kappa) if (kappa is not None and not math.isnan(kappa)) else None, 'agreement_distribution': dist, 'pairwise_agreement': pairwise, 'warning': 'Agreement computed on MCQ option letters (A/B/C/D/...). Predictions without clear options are marked as "Z" (unknown).'}
-
-            if report['fleiss_kappa'] is None:
-                report['agreement_score'] = None
-                report['risk_score'] = None
+            if report["fleiss_kappa"] is None:
+                report["agreement_score"] = None
+                report["risk_score"] = None
+                report["score"] = None
             else:
-                report['agreement_score'] = report['fleiss_kappa']
-                report['risk_score'] = (1.0 - report['fleiss_kappa']) / 2.0
+                report["agreement_score"] = report["fleiss_kappa"]
+                report["risk_score"] = (1.0 - report["fleiss_kappa"]) / 2.0
+                # normalized severity score: risk/instability (0..1), higher == worse
+                report["score"] = float(report["risk_score"])
 
             # build low-agreement list
             low_questions = []
             for i, q in enumerate(per_question_details):
                 row = matrix[i]
                 n_raters_local = sum(row)
-                vote_distribution = {cat: q['counts_map'].get(cat, 0) for cat in all_categories}
+                vote_distribution = {
+                    cat: q["counts_map"].get(cat, 0) for cat in all_categories
+                }
                 max_count = max(row)
-                majority_candidates = [cat for cat, cnt in vote_distribution.items() if cnt == max_count]
-                majority_answer = majority_candidates[0] if len(majority_candidates) == 1 else None
-                agreement_ratio = (max_count / n_raters_local) if n_raters_local > 0 else 0.0
+                majority_candidates = [
+                    cat for cat, cnt in vote_distribution.items() if cnt == max_count
+                ]
+                majority_answer = (
+                    majority_candidates[0] if len(majority_candidates) == 1 else None
+                )
+                agreement_ratio = (
+                    (max_count / n_raters_local) if n_raters_local > 0 else 0.0
+                )
                 if max_count == n_raters_local:
-                    level = 'full'
+                    level = "full"
                 elif max_count == 1:
-                    level = 'complete_disagreement'
+                    level = "complete_disagreement"
                 else:
-                    level = 'partial'
+                    level = "partial"
 
-                entry = {'question_id': q['idx'], 'answers': q['answers'], 'agreement_level': level, 'vote_distribution': vote_distribution, 'majority_answer': majority_answer, 'agreement_ratio': agreement_ratio}
+                entry = {
+                    "question_id": q["idx"],
+                    "answers": q["answers"],
+                    "agreement_level": level,
+                    "vote_distribution": vote_distribution,
+                    "majority_answer": majority_answer,
+                    "agreement_ratio": agreement_ratio,
+                }
                 include = False
-                if level == 'complete_disagreement':
+                if level == "complete_disagreement":
                     include = True
                 else:
-                    thresh = self.config.get('low_agreement_threshold', None)
+                    thresh = self.config.get("low_agreement_threshold", None)
                     if thresh is not None and agreement_ratio < float(thresh):
                         include = True
                 if include:
                     low_questions.append(entry)
 
-            return {'report': report, '_low_questions': low_questions, '_q_stats': q_stats_local}
+            return {
+                "report": report,
+                "_low_questions": low_questions,
+                "_q_stats": q_stats_local,
+            }
 
         # compute full
-        full_ctx = AnalysisContext(dataset=context.dataset, dataset_name=context.dataset_name, result_paths=context.result_paths, loaded_results=context.full_results)
+        full_ctx = AnalysisContext(
+            dataset=context.dataset,
+            dataset_name=context.dataset_name,
+            result_paths=context.result_paths,
+            loaded_results=context.full_results,
+        )
         full_out = _compute_for_ctx(full_ctx)
-        full_report = full_out['report']
+        full_report = full_out["report"]
 
         # preserve full-run exports
-        self._q_stats = full_out.get('_q_stats', [])
+        self._q_stats = full_out.get("_q_stats", [])
 
         findings = []
-        for q in full_out.get('_low_questions', []):
-            sev = 'critical' if q.get('agreement_level') in ('complete_disagreement',) else 'warning'
-            findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': sev, 'reason': 'low_answer_agreement', 'score': q.get('agreement_ratio'), 'metadata': {'vote_distribution': q.get('vote_distribution')}})
+        for q in full_out.get("_low_questions", []):
+            sev = (
+                "critical"
+                if q.get("agreement_level") in ("complete_disagreement",)
+                else "warning"
+            )
+            findings.append(
+                {
+                    "question_id": q.get("question_id"),
+                    "detector": self.NAME,
+                    "severity": sev,
+                    "reason": "low_answer_agreement",
+                    "score": q.get("agreement_ratio"),
+                    "metadata": {"vote_distribution": q.get("vote_distribution")},
+                }
+            )
         self._full_findings = findings
 
         # if no blind-support or not in comparison mode, return full report
-        if not getattr(context, 'mode', None) == 'full_vs_blind' or not getattr(self, 'SUPPORTS_COMPARISON', False):
+        if not getattr(context, "mode", None) == "full_vs_blind" or not getattr(
+            self, "SUPPORTS_COMPARISON", False
+        ):
             return full_report
 
         # compute blind
-        blind_ctx = AnalysisContext(dataset=context.dataset, dataset_name=context.dataset_name, result_paths=context.result_paths, loaded_results=context.blind_results)
+        blind_ctx = AnalysisContext(
+            dataset=context.dataset,
+            dataset_name=context.dataset_name,
+            result_paths=context.result_paths,
+            loaded_results=context.blind_results,
+        )
         blind_out = _compute_for_ctx(blind_ctx)
-        blind_report = blind_out['report']
+        blind_report = blind_out["report"]
 
-        self._blind_q_stats = full_out.get('_q_stats', [])
+        self._blind_q_stats = full_out.get("_q_stats", [])
 
         delta = {}
         try:
-            kf = full_report.get('fleiss_kappa')
-            kb = blind_report.get('fleiss_kappa')
+            kf = full_report.get("fleiss_kappa")
+            kb = blind_report.get("fleiss_kappa")
             if kf is not None and kb is not None:
-                delta['fleiss_kappa_delta'] = kf - kb
+                delta["fleiss_kappa_delta"] = kf - kb
             # distribution deltas
-            for key in ['full_agreement', 'partial_agreement', 'complete_disagreement']:
-                df = full_report.get('agreement_distribution', {}).get(key)
-                db = blind_report.get('agreement_distribution', {}).get(key)
+            for key in ["full_agreement", "partial_agreement", "complete_disagreement"]:
+                df = full_report.get("agreement_distribution", {}).get(key)
+                db = blind_report.get("agreement_distribution", {}).get(key)
                 if df is not None and db is not None:
-                    delta[f'dist_delta_{key}'] = df - db
+                    delta[f"dist_delta_{key}"] = df - db
         except Exception:
             pass
-            
+
         blind_findings = []
         # blind_out computed earlier; need to recompute low questions locally
         # If blind_out available from earlier computation, attach its low_questions
         try:
-            blind_ctx = AnalysisContext(dataset=context.dataset, dataset_name=context.dataset_name, result_paths=context.result_paths, loaded_results=context.blind_results)
+            blind_ctx = AnalysisContext(
+                dataset=context.dataset,
+                dataset_name=context.dataset_name,
+                result_paths=context.result_paths,
+                loaded_results=context.blind_results,
+            )
             blind_temp = _compute_for_ctx(blind_ctx)
-            for q in blind_temp.get('_low_questions', []):
-                sev = 'critical' if q.get('agreement_level') in ('complete_disagreement',) else 'warning'
-                blind_findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': sev, 'reason': 'low_answer_agreement', 'score': q.get('agreement_ratio'), 'metadata': {'vote_distribution': q.get('vote_distribution')}})
+            for q in blind_temp.get("_low_questions", []):
+                sev = (
+                    "critical"
+                    if q.get("agreement_level") in ("complete_disagreement",)
+                    else "warning"
+                )
+                blind_findings.append(
+                    {
+                        "question_id": q.get("question_id"),
+                        "detector": self.NAME,
+                        "severity": sev,
+                        "reason": "low_answer_agreement",
+                        "score": q.get("agreement_ratio"),
+                        "metadata": {"vote_distribution": q.get("vote_distribution")},
+                    }
+                )
         except Exception:
             pass
-        
+
         self._blind_findings = blind_findings
-        
-        return {'full': full_report, 'blind': blind_report, 'delta': delta}
+
+        full_section = full_report
+        blind_section = blind_report
+        top_score = (
+            float(full_section.get("score"))
+            if full_section.get("score") is not None
+            else None
+        )
+        return {
+            "full": full_section,
+            "blind": blind_section,
+            "delta": delta,
+            "score": top_score,
+        }
 
     def run(self, context, out_dir: str = None, **kwargs):
         # Call base run() to write the main detector report (keeps existing behavior)
@@ -252,15 +368,33 @@ class FleissKappaAgreementDetector(BaseDetector):
         # Write low agreement questions file into reports/low_agreement_questions.json
         if out_dir is not None:
             try:
-                rpt_dir = Path(out_dir) / 'reports' / self.NAME
+                rpt_dir = Path(out_dir) / "reports" / self.NAME
                 rpt_dir.mkdir(parents=True, exist_ok=True)
-                p = rpt_dir / f'{self.NAME}_findings.json'
-                p.write_text(json.dumps({"findings": self.merge_findings(self._full_findings, self._blind_findings), "detector" : self.NAME}, ensure_ascii=False, indent=2), encoding='utf-8')
-                
-                p_all = rpt_dir / 'all_full_infer_stat.json'
-                p_all.write_text(json.dumps(self._q_stats, ensure_ascii=False, indent=2), encoding='utf-8')
-                p_all_blind = rpt_dir / 'all_blind_infer_stat.json'
-                p_all_blind.write_text(json.dumps(self._blind_q_stats, ensure_ascii=False, indent=2), encoding='utf-8')
+                p = rpt_dir / f"{self.NAME}_findings.json"
+                p.write_text(
+                    json.dumps(
+                        {
+                            "findings": self.merge_findings(
+                                self._full_findings, self._blind_findings
+                            ),
+                            "detector": self.NAME,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+
+                p_all = rpt_dir / "all_full_infer_stat.json"
+                p_all.write_text(
+                    json.dumps(self._q_stats, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                p_all_blind = rpt_dir / "all_blind_infer_stat.json"
+                p_all_blind.write_text(
+                    json.dumps(self._blind_q_stats, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
             except Exception:
-                logger.exception('Failed to write low_agreement_questions.json')
+                logger.exception("Failed to write low_agreement_questions.json")
         return result

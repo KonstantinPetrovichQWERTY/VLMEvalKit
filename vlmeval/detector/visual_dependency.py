@@ -11,13 +11,13 @@ logger = get_logger(__name__)
 
 
 class VisualDependencyDetector(BaseDetector):
-    NAME = 'visual_dependency'
-    DESCRIPTION = 'Assess how much benchmark questions depend on visual input by comparing full vs blind runs.'
+    NAME = "visual_dependency"
+    DESCRIPTION = "Assess how much benchmark questions depend on visual input by comparing full vs blind runs."
     DEFAULT_CONFIG = {
-        'visual_dependent_full_thresh': 0.99,
-        'visual_dependent_blind_thresh': 0.01,
-        'visual_supplement_gain_thresh': 0.2,
-        'conflicting_gain_thresh': 0.2,
+        "visual_dependent_full_thresh": 0.99,
+        "visual_dependent_blind_thresh": 0.01,
+        "visual_supplement_gain_thresh": 0.2,
+        "conflicting_gain_thresh": 0.2,
     }
     REQUIRES_FULL_RESULTS = True
     REQUIRES_BLIND_RESULTS = True
@@ -30,6 +30,7 @@ class VisualDependencyDetector(BaseDetector):
             return None
         try:
             import pandas as pd
+
             if not isinstance(res, pd.DataFrame):
                 if isinstance(res, list) and len(res) > 0 and isinstance(res[0], dict):
                     res = pd.DataFrame(res)
@@ -40,20 +41,24 @@ class VisualDependencyDetector(BaseDetector):
             if isinstance(res, list):
                 for r in res:
                     hit = None
-                    for hcol in ['hit', 'correct', 'is_correct', 'isCorrect']:
+                    for hcol in ["hit", "correct", "is_correct", "isCorrect"]:
                         if isinstance(r, dict) and hcol in r:
                             hit = r.get(hcol)
                             break
                     if hit is not None:
-                        if str(hit).lower() in ['true', '1', 't', 'yes'] or hit is True or hit == 1:
+                        if (
+                            str(hit).lower() in ["true", "1", "t", "yes"]
+                            or hit is True
+                            or hit == 1
+                        ):
                             labels.append(1)
                         else:
                             labels.append(0)
                     else:
                         # fallback: compare prediction and answer if present
-                        if isinstance(r, dict) and 'prediction' in r and 'answer' in r:
-                            pred = self._normalize_answer(r.get('prediction'))
-                            ans = self._normalize_answer(r.get('answer'))
+                        if isinstance(r, dict) and "prediction" in r and "answer" in r:
+                            pred = self._normalize_answer(r.get("prediction"))
+                            ans = self._normalize_answer(r.get("answer"))
                             if pred is None or ans is None:
                                 labels.append(None)
                             else:
@@ -66,21 +71,25 @@ class VisualDependencyDetector(BaseDetector):
             # now res is DataFrame
             for idx, row in res.iterrows():
                 hit = None
-                for hcol in ['hit', 'correct', 'is_correct', 'isCorrect']:
+                for hcol in ["hit", "correct", "is_correct", "isCorrect"]:
                     if hcol in res.columns:
                         hit = row.get(hcol)
                         break
 
                 if hit is not None:
-                    if str(hit).lower() in ['true', '1', 't', 'yes'] or hit is True or hit == 1:
+                    if (
+                        str(hit).lower() in ["true", "1", "t", "yes"]
+                        or hit is True
+                        or hit == 1
+                    ):
                         labels.append(1)
                     else:
                         labels.append(0)
                     continue
 
-                if 'prediction' in res.columns and 'answer' in res.columns:
-                    pred = row.get('prediction')
-                    ans = row.get('answer')
+                if "prediction" in res.columns and "answer" in res.columns:
+                    pred = row.get("prediction")
+                    ans = row.get("answer")
                     pred_norm = self._normalize_answer(pred)
                     ans_norm = self._normalize_answer(ans)
                     if pred_norm is None or ans_norm is None:
@@ -95,31 +104,37 @@ class VisualDependencyDetector(BaseDetector):
             return None
 
     def analyze(self, context: AnalysisContext, **kwargs) -> Dict[str, Any]:
-        rp = getattr(context, 'result_paths', {})
-        loaded = getattr(context, 'loaded_results', {})
+        rp = getattr(context, "result_paths", {})
+        loaded = getattr(context, "loaded_results", {})
         if not rp or len(rp) < 1:
-            raise DetectorInputError('VisualDependencyDetector requires result files for analysis.')
+            raise DetectorInputError(
+                "VisualDependencyDetector requires result files for analysis."
+            )
 
         # Build mapping model -> eval_id -> variant -> key
         # Note: bench_eval also stores a 'blind' path inside the same entry and preloads it
         mapping = {}
         for key, v in rp.items():
-            model = v.get('model')
-            eval_id = v.get('eval_id')
-            variant = v.get('variant', 'full')
+            model = v.get("model")
+            eval_id = v.get("eval_id")
+            variant = v.get("variant", "full")
             mapping.setdefault(model, {}).setdefault(eval_id, {})[variant] = key
             # If bench_eval stored a blind path in this entry, it also loaded it to loaded_results under key + '__blind'
-            if v.get('blind'):
-                mapping.setdefault(model, {}).setdefault(eval_id, {})['blind'] = f"{key}__blind"
+            if v.get("blind"):
+                mapping.setdefault(model, {}).setdefault(eval_id, {})[
+                    "blind"
+                ] = f"{key}__blind"
 
         models = list(mapping.keys())
         if len(models) < 1:
-            raise DetectorInputError('No models found in result paths.')
+            raise DetectorInputError("No models found in result paths.")
 
         # Find eval_ids present with both full and blind for each model
         evals_with_both_per_model = {}
         for m, evals in mapping.items():
-            good = set([eid for eid, mp in evals.items() if 'full' in mp and 'blind' in mp])
+            good = set(
+                [eid for eid, mp in evals.items() if "full" in mp and "blind" in mp]
+            )
             evals_with_both_per_model[m] = good
 
         # intersect eval_ids across models
@@ -131,7 +146,9 @@ class VisualDependencyDetector(BaseDetector):
                 common = common.intersection(s)
 
         if not common:
-            raise DetectorInputError('Require matching full and blind runs (same eval_id) across all models.')
+            raise DetectorInputError(
+                "Require matching full and blind runs (same eval_id) across all models."
+            )
 
         # choose an eval_id (latest sorted)
         chosen_eval = sorted(list(common))[-1]
@@ -142,8 +159,8 @@ class VisualDependencyDetector(BaseDetector):
         model_keys = []
         for m in models:
             key_map = mapping[m].get(chosen_eval, {})
-            full_key = key_map.get('full')
-            blind_key = key_map.get('blind')
+            full_key = key_map.get("full")
+            blind_key = key_map.get("blind")
             # If blind_key is absent but rp entry contains a blind path, try the synthetic loaded key
             if blind_key is None:
                 # attempt to derive synthetic blind key
@@ -151,7 +168,9 @@ class VisualDependencyDetector(BaseDetector):
                 if candidate and candidate in context.loaded_results:
                     blind_key = candidate
             if not full_key or not blind_key:
-                raise DetectorInputError(f'Missing full/blind pair for model {m} and eval {chosen_eval}')
+                raise DetectorInputError(
+                    f"Missing full/blind pair for model {m} and eval {chosen_eval}"
+                )
             model_keys.append(m)
             full_res = loaded.get(full_key)
             blind_res = loaded.get(blind_key)
@@ -167,14 +186,15 @@ class VisualDependencyDetector(BaseDetector):
                 ref = full_by_model.get(m)
                 break
         if ref is None:
-            raise DetectorInputError('No extractable correctness labels in full runs.')
+            raise DetectorInputError("No extractable correctness labels in full runs.")
 
         total_q = len(ref)
 
         per_question = []
         counts = Counter()
         visual_gains = []
-
+        question_scores = []
+        visual_dependency_scores = []
         for i in range(total_q):
             skip = False
             full_vals = []
@@ -199,59 +219,95 @@ class VisualDependencyDetector(BaseDetector):
             blind_correct = sum(1 for x in blind_vals if x == 1)
             full_acc = full_correct / float(num_models)
             blind_acc = blind_correct / float(num_models)
-            gain = full_acc - blind_acc
+            gain = max(0, full_acc - blind_acc)
             visual_gains.append(gain)
+            question_score = full_acc * (1.0 - blind_acc)
 
             # classify
-            full_thresh = float(self.config.get('visual_dependent_full_thresh', 0.99))
-            blind_thresh = float(self.config.get('visual_dependent_blind_thresh', 0.01))
-            supplement_gain = float(self.config.get('visual_supplement_gain_thresh', 0.2))
-            conflict_gain = float(self.config.get('conflicting_gain_thresh', 0.2))
+            full_thresh = float(self.config.get("visual_dependent_full_thresh", 0.99))
+            blind_thresh = float(self.config.get("visual_dependent_blind_thresh", 0.01))
+            supplement_gain = float(
+                self.config.get("visual_supplement_gain_thresh", 0.2)
+            )
+            conflict_gain = float(self.config.get("conflicting_gain_thresh", 0.2))
 
             if full_acc >= full_thresh and blind_acc <= blind_thresh:
-                category = 'visual_dependent'
+                category = "visual_dependent"
             elif blind_acc > full_acc + conflict_gain:
-                category = 'conflicting_visual_signal'
+                category = "conflicting_visual_signal"
             elif abs(full_acc - blind_acc) <= 1e-6:
-                category = 'text_only'
+                category = "text_only"
             elif (full_acc - blind_acc) >= supplement_gain:
-                category = 'visual_supplement'
+                category = "visual_supplement"
             else:
                 # small gains -> treat as text_only
-                category = 'text_only'
+                category = "text_only"
 
             counts[category] += 1
-            per_question.append({
-                'question_id': i,
-                'full_accuracy': full_acc,
-                'blind_accuracy': blind_acc,
-                'visual_gain': gain,
-                'category': category,
-            })
+            per_question.append(
+                {
+                    "question_id": i,
+                    "full_accuracy": full_acc,
+                    "blind_accuracy": blind_acc,
+                    "visual_gain": gain,
+                    "visual_dependency": 1 - blind_acc,
+                    "question_score": question_score,
+                    "category": category,
+                }
+            )
+            visual_dependency_scores.append(1.0 - blind_acc)
+            question_scores.append(question_score)
 
         included_q = len(per_question)
+        detector_score = (
+            sum(question_scores) / len(question_scores) if question_scores else 0.0
+        )
         avg_gain = sum(visual_gains) / included_q if included_q > 0 else 0.0
 
         dist = {
-            'visual_dependent': 100.0 * counts.get('visual_dependent', 0) / included_q if included_q > 0 else 0.0,
-            'visual_supplement': 100.0 * counts.get('visual_supplement', 0) / included_q if included_q > 0 else 0.0,
-            'text_only': 100.0 * counts.get('text_only', 0) / included_q if included_q > 0 else 0.0,
-            'conflicting_visual_signal': 100.0 * counts.get('conflicting_visual_signal', 0) / included_q if included_q > 0 else 0.0,
+            "visual_dependent": (
+                100.0 * counts.get("visual_dependent", 0) / included_q
+                if included_q > 0
+                else 0.0
+            ),
+            "visual_supplement": (
+                100.0 * counts.get("visual_supplement", 0) / included_q
+                if included_q > 0
+                else 0.0
+            ),
+            "text_only": (
+                100.0 * counts.get("text_only", 0) / included_q
+                if included_q > 0
+                else 0.0
+            ),
+            "conflicting_visual_signal": (
+                100.0 * counts.get("conflicting_visual_signal", 0) / included_q
+                if included_q > 0
+                else 0.0
+            ),
         }
 
-        visual_dependency_score = max(0.0, min(1.0, avg_gain))
+        # visual_dependency_score = max(0.0, min(1.0, avg_gain))
 
         report = {
-            'date_time': f"{datetime.now()}",
-            'detector': self.NAME,
-            'dataset': getattr(context, 'dataset_name', None),
-            'participants': [v.get('eval', None) for k, v in context.result_paths.items()] + [v.get('blind', None) for k, v in context.result_paths.items()],
-            'num_models': num_models,
-            'num_questions': included_q,
-            'average_visual_gain': avg_gain,
-            'category_distribution': dist,
-            'visual_dependency_score': visual_dependency_score,
-            'warning': 'Requires matching full and blind runs. Agreement computed on evaluation correctness labels.'
+            "date_time": f"{datetime.now()}",
+            "detector": self.NAME,
+            "dataset": getattr(context, "dataset_name", None),
+            "participants": [
+                v.get("eval", None) for k, v in context.result_paths.items()
+            ]
+            + [v.get("blind", None) for k, v in context.result_paths.items()],
+            "num_models": num_models,
+            "num_questions": included_q,
+            "average_visual_gain": avg_gain,
+            "category_distribution": dist,
+            "visual_dependency_score": (
+                sum(visual_dependency_scores) / len(visual_dependency_scores)
+                if visual_dependency_scores
+                else 0.0
+            ),
+            "score": float(detector_score),
+            "warning": "Requires matching full and blind runs. Agreement computed on evaluation correctness labels.",
         }
 
         # cache for run()
@@ -259,10 +315,30 @@ class VisualDependencyDetector(BaseDetector):
 
         findings = []
         for q in self._per_question:
-            if q.get('category') == 'visual_dependent':
-                findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': 'critical', 'reason': 'visual_dependency', 'score': q.get('visual_gain'), 'metadata': {'full_accuracy': q.get('full_accuracy'), 'blind_accuracy': q.get('blind_accuracy')}})
-            elif q.get('category') == 'visual_supplement':
-                findings.append({'question_id': q.get('question_id'), 'detector': self.NAME, 'severity': 'warning', 'reason': 'visual_supplement', 'score': q.get('visual_gain')})
+            if q.get("category") == "visual_dependent":
+                findings.append(
+                    {
+                        "question_id": q.get("question_id"),
+                        "detector": self.NAME,
+                        "severity": "critical",
+                        "reason": "visual_dependency",
+                        "score": q.get("question_score"),
+                        "metadata": {
+                            "full_accuracy": q.get("full_accuracy"),
+                            "blind_accuracy": q.get("blind_accuracy"),
+                        },
+                    }
+                )
+            elif q.get("category") == "visual_supplement":
+                findings.append(
+                    {
+                        "question_id": q.get("question_id"),
+                        "detector": self.NAME,
+                        "severity": "warning",
+                        "reason": "visual_supplement",
+                        "score": q.get("question_score"),
+                    }
+                )
 
         self._findings = findings
 
@@ -272,13 +348,23 @@ class VisualDependencyDetector(BaseDetector):
         res = super().run(context, out_dir=out_dir, **kwargs)
         if out_dir:
             try:
-                rpt_dir = Path(out_dir) / 'reports' / self.NAME
+                rpt_dir = Path(out_dir) / "reports" / self.NAME
                 rpt_dir.mkdir(parents=True, exist_ok=True)
-                p = rpt_dir / f'{self.NAME}_findings.json'
-                p.write_text(json.dumps({"findings": self._findings, "detector" : self.NAME}, ensure_ascii=False, indent=2), encoding='utf-8')
+                p = rpt_dir / f"{self.NAME}_findings.json"
+                p.write_text(
+                    json.dumps(
+                        {"findings": self._findings, "detector": self.NAME},
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
 
-                p_all = rpt_dir / 'all_stat.json'
-                p_all.write_text(json.dumps(self._per_question, ensure_ascii=False, indent=2), encoding='utf-8')
+                p_all = rpt_dir / "all_stat.json"
+                p_all.write_text(
+                    json.dumps(self._per_question, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
             except Exception:
-                logger.exception('Failed to write visual dependency reports')
+                logger.exception("Failed to write visual dependency reports")
         return res

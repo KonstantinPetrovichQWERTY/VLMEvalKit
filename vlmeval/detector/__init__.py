@@ -6,11 +6,11 @@ from .visual_dependency import VisualDependencyDetector
 from .distractor_similarity import DistractorSimilarityDetector
 
 __all__ = [
-    'AnswerOptionsDistributionDetector',
-    'FleissKappaAgreementDetector',
-    'ConsensusErrorDetector',
-    'CorrectnessAgreementDetector',
-    'VisualDependencyDetector',
-    'DistractorSimilarityDetector',
-    'QuestionImageRelevanceDetector',
+    "AnswerOptionsDistributionDetector",
+    "FleissKappaAgreementDetector",
+    "ConsensusErrorDetector",
+    "CorrectnessAgreementDetector",
+    "VisualDependencyDetector",
+    "DistractorSimilarityDetector",
+    "QuestionImageRelevanceDetector",
 ]
